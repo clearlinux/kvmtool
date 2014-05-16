@@ -158,6 +158,11 @@ void kvm_run_set_wrapper_sandbox(void)
 	OPT_INTEGER('\0', "debug-iodelay", &(cfg)->debug_iodelay,	\
 			"Delay IO by millisecond"),			\
 									\
+	OPT_GROUP("VFIO options:"),					\
+	OPT_CALLBACK('\0', "vfio-groups", NULL, "group number,...",	\
+			"Pass through a list of VFIO groups to the "	\
+			"virtual machine", vfio_group_parser, kvm),	\
+									\
 	OPT_ARCH(RUN, cfg)						\
 	OPT_END()							\
 	};
