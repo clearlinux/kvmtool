@@ -21,6 +21,10 @@
 #define UIP_IP_P_TCP		0X06
 #define UIP_IP_P_ICMP		0X01
 
+#define UIP_ICMP_ECHO_REPLY	0
+#define UIP_ICMP_UNREACH	5
+#define UIP_ICMP_ECHO		8
+
 #define UIP_TCP_HDR_LEN		0x50
 #define UIP_TCP_WIN_SIZE	14600
 #define UIP_TCP_FLAG_FIN	1
@@ -116,7 +120,6 @@ struct uip_ip {
 } __attribute__((packed));
 
 struct uip_icmp {
-	struct uip_ip ip;
 	u8 type;
 	u8 code;
 	u16 csum;
@@ -125,10 +128,6 @@ struct uip_icmp {
 } __attribute__((packed));
 
 struct uip_udp {
-	/*
-	 * FIXME: IP Options (IP hdr len > 20 bytes) are not supported
-	 */
-	struct uip_ip ip;
 	u16 sport;
 	u16 dport;
 	/*
@@ -140,10 +139,6 @@ struct uip_udp {
 } __attribute__((packed));
 
 struct uip_tcp {
-	/*
-	 * FIXME: IP Options (IP hdr len > 20 bytes) are not supported
-	 */
-	struct uip_ip ip;
 	u16 sport;
 	u16 dport;
 	u32 seq;
@@ -250,6 +245,7 @@ struct uip_tcp_socket {
 	u32 dip, sip;
 	u8 *payload;
 	int fd;
+	int dead;
 };
 
 struct uip_tx_arg {
@@ -263,6 +259,11 @@ struct uip_tx_arg {
 static inline u16 uip_ip_hdrlen(struct uip_ip *ip)
 {
 	return (ip->vhl & 0x0f) * 4;
+}
+
+static inline void *uip_ip_proto(struct uip_ip *ip)
+{
+	return ((uint8_t *)&(ip->vhl)) + (ip->vhl & 0x0f) * 4;
 }
 
 static inline u16 uip_ip_len(struct uip_ip *ip)
@@ -285,23 +286,24 @@ static inline u16 uip_tcp_hdrlen(struct uip_tcp *tcp)
 	return (tcp->off >> 4) * 4;
 }
 
-static inline u16 uip_tcp_len(struct uip_tcp *tcp)
+static inline u16 uip_tcp_len(struct uip_ip *ip, struct uip_tcp *tcp)
 {
-	struct uip_ip *ip;
-
-	ip = &tcp->ip;
-
 	return uip_ip_len(ip) - uip_ip_hdrlen(ip);
 }
 
-static inline u16 uip_tcp_payloadlen(struct uip_tcp *tcp)
+static inline u16 uip_tcp_payloadlen(struct uip_ip *ip, struct uip_tcp *tcp)
 {
-	return uip_tcp_len(tcp) - uip_tcp_hdrlen(tcp);
+	return uip_tcp_len(ip, tcp) - uip_tcp_hdrlen(tcp);
 }
 
 static inline u8 *uip_tcp_payload(struct uip_tcp *tcp)
 {
 	return (u8 *)&tcp->sport + uip_tcp_hdrlen(tcp);
+}
+
+static inline bool uip_tcp_is_rst(struct uip_tcp *tcp)
+{
+	return (tcp->flg & UIP_TCP_FLAG_RST) != 0;
 }
 
 static inline bool uip_tcp_is_syn(struct uip_tcp *tcp)
@@ -312,6 +314,11 @@ static inline bool uip_tcp_is_syn(struct uip_tcp *tcp)
 static inline bool uip_tcp_is_fin(struct uip_tcp *tcp)
 {
 	return (tcp->flg & UIP_TCP_FLAG_FIN) != 0;
+}
+
+static inline bool uip_tcp_is_ack(struct uip_tcp *tcp)
+{
+	return (tcp->flg & UIP_TCP_FLAG_ACK) != 0;
 }
 
 static inline u32 uip_tcp_isn(struct uip_tcp *tcp)
@@ -344,9 +351,9 @@ int uip_tx_do_ipv4_udp(struct uip_tx_arg *arg);
 int uip_tx_do_ipv4(struct uip_tx_arg *arg);
 int uip_tx_do_arp(struct uip_tx_arg *arg);
 
-u16 uip_csum_icmp(struct uip_icmp *icmp);
-u16 uip_csum_udp(struct uip_udp *udp);
-u16 uip_csum_tcp(struct uip_tcp *tcp);
+u16 uip_csum_icmp(struct uip_ip *ip, struct uip_icmp *icmp);
+u16 uip_csum_udp(struct uip_ip *ip, struct uip_udp *udp);
+u16 uip_csum_tcp(struct uip_ip *ip, struct uip_tcp *tcp);
 u16 uip_csum_ip(struct uip_ip *ip);
 
 struct uip_buf *uip_buf_set_used(struct uip_info *info, struct uip_buf *buf);

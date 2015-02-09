@@ -144,9 +144,10 @@ static int uip_dhcp_fill_option(struct uip_info *info, struct uip_dhcp *dhcp, in
 static int uip_dhcp_make_pkg(struct uip_info *info, struct uip_udp_socket *sk, struct uip_buf *buf, u8 reply_msg_type)
 {
 	struct uip_dhcp *dhcp;
+	struct uip_ip *ip;
 
-	dhcp		= (struct uip_dhcp *)buf->eth;
-
+	ip		= (struct uip_ip *)buf->eth;
+	dhcp		= (struct uip_dhcp *)(ip + 1);
 	dhcp->msg_type	= 2;
 	dhcp->client_ip	= 0;
 	dhcp->your_ip	= htonl(info->guest_ip);
@@ -166,12 +167,14 @@ static int uip_dhcp_make_pkg(struct uip_info *info, struct uip_udp_socket *sk, s
 int uip_tx_do_ipv4_udp_dhcp(struct uip_tx_arg *arg)
 {
 	struct uip_udp_socket sk;
+	struct uip_ip *ip;
 	struct uip_dhcp *dhcp;
 	struct uip_info *info;
 	struct uip_buf *buf;
 	u8 reply_msg_type;
 
-	dhcp = (struct uip_dhcp *)arg->eth;
+	ip = (struct uip_ip *)arg->eth;
+	dhcp = (struct uip_dhcp *)(((uint8_t *)ip) + uip_ip_hdrlen(ip));
 
 	if (uip_dhcp_is_discovery(dhcp))
 		reply_msg_type = UIP_DHCP_OFFER;
