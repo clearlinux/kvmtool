@@ -103,7 +103,8 @@ void kvm_run_set_wrapper_sandbox(void)
 	OPT_U64('m', "mem", &(cfg)->ram_size, "Virtual machine memory"	\
 		" size in MiB."),					\
 	OPT_CALLBACK('\0', "shmem", NULL,				\
-		     "[pci:]<addr>:<size>[:handle=<handle>][:create]",	\
+		     "[pci:]<addr>:<size>[:handle=<handle>|:file=path]" \
+		     "[:private][:create]",				\
 		     "Share host shmem with guest via pci device",	\
 		     shmem_parser, NULL),				\
 	OPT_CALLBACK('d', "disk", kvm, "image or rootfs_dir", "Disk "	\

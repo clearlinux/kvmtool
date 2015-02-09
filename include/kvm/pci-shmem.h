@@ -18,6 +18,8 @@ struct shmem_info {
 	u64 size;
 	char *handle;
 	int create;
+	int private;
+	int file;
 };
 
 int pci_shmem__init(struct kvm *kvm);
