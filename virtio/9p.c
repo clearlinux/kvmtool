@@ -63,21 +63,21 @@ static void get_owner(const char *p, uid_t *u, gid_t *g)
         sscanf(buf, "%d", g);
 }
 
-static void set_owner_default(const char *p, struct p9_fid *fid )
+static void set_owner_default(const char *p, struct p9_fid *fid, gid_t gid )
 {
-    return set_owner(p, fid->uid, getegid());
+    return set_owner(p, fid->uid, gid);
 }
 
-static void fset_owner_default(int fd, struct p9_fid *fid )
+static void fset_owner_default(int fd, struct p9_fid *fid, gid_t gid )
 {
-    return fset_owner(fd, fid->uid, getegid());
+    return fset_owner(fd, fid->uid, gid);
 }
 
-static int mkdir_virt(struct p9_fid *fid, const char *p, mode_t mode)
+static int mkdir_virt(struct p9_fid *fid, gid_t gid, const char *p, mode_t mode)
 {
     int err = mkdir(p, mode);
     if (!err)
-        set_owner_default(p, fid);
+        set_owner_default(p, fid, gid);
     return err;
 }
 
@@ -94,13 +94,13 @@ static DIR *opendir_virt(const char *p)
     return opendir(p);
 }
 
-static int opencreat_virt(struct p9_fid *fid, const char *p, int flags, int mode)
+static int opencreat_virt(struct p9_fid *fid, gid_t gid, const char *p, int flags, int mode)
 {
     if (flags & O_CREAT) {
         /* Do an O_EXCL open, if it succeeds set the ownership properties */
         int fd = open(p, flags | O_EXCL, mode);
         if (fd >= 0) {
-            fset_owner_default(fd, fid);
+            fset_owner_default(fd, fid, gid);
             return fd;
         }
     }
@@ -132,21 +132,21 @@ static int rename_virt(const char *p1, const char *p2)
     return rename(p1, p2);
 }
 
-static int mknod_virt(struct p9_fid *fid, const char *p, mode_t mode, dev_t dev)
+static int mknod_virt(struct p9_fid *fid, gid_t gid, const char *p, mode_t mode, dev_t dev)
 {
     int err = mknod(p, mode, dev);
     if (err)
         return err;
-    set_owner_default(p, fid);
+    set_owner_default(p, fid, gid);
     return 0;
 }
 
-static int symlink_virt(struct p9_fid *fid, const char *p1, const char *p2)
+static int symlink_virt(struct p9_fid *fid, gid_t gid, const char *p1, const char *p2)
 {
     int err = symlink(p1, p2);
     if (err)
         return err;
-    set_owner_default(p2, fid);
+    set_owner_default(p2, fid, gid);
     return 0;
 }
 
@@ -414,7 +414,7 @@ static void virtio_p9_create(struct p9_dev *p9dev,
 	flags = virtio_p9_openflags(flags);
 
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	fd = opencreat_virt(dfid, full_path, flags | O_CREAT, mode);
+	fd = opencreat_virt(dfid, gid, full_path, flags | O_CREAT, mode);
 	if (fd < 0)
 		goto err_out;
 	dfid->fd = fd;
@@ -455,7 +455,7 @@ static void virtio_p9_mkdir(struct p9_dev *p9dev,
 	dfid = get_fid(p9dev, dfid_val);
 
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	ret = mkdir_virt(dfid, full_path, mode);
+	ret = mkdir_virt(dfid, gid, full_path, mode);
 	if (ret < 0)
 		goto err_out;
 
@@ -996,7 +996,7 @@ static void virtio_p9_mknod(struct p9_dev *p9dev,
 
 	dfid = get_fid(p9dev, fid_val);
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	ret = mknod_virt(dfid, full_path, mode, makedev(major, minor));
+	ret = mknod_virt(dfid, gid, full_path, mode, makedev(major, minor));
 	if (ret < 0)
 		goto err_out;
 
@@ -1063,7 +1063,7 @@ static void virtio_p9_symlink(struct p9_dev *p9dev,
 
 	dfid = get_fid(p9dev, fid_val);
 	sprintf(new_name, "%s/%s", dfid->abs_path, name);
-	ret = symlink_virt(dfid, old_path, new_name);
+	ret = symlink_virt(dfid, gid, old_path, new_name);
 	if (ret < 0)
 		goto err_out;
 
