@@ -31,6 +31,9 @@ static void filter_cpuid(struct kvm_cpuid2 *kvm_cpuid)
 			/* Set X86_FEATURE_HYPERVISOR */
 			if (entry->index == 0)
 				entry->ecx |= (1 << 31);
+                        /* Set CPUID_EXT_TSC_DEADLINE_TIMER*/
+			if (entry->index == 0)
+				entry->ecx |= (1 << 24);
 			break;
 		case 6:
 			/* Clear X86_FEATURE_EPB */
