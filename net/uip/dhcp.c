@@ -4,19 +4,54 @@
 
 #define EMPTY_ADDR "0.0.0.0"
 
-static inline bool uip_dhcp_is_discovery(struct uip_dhcp *dhcp)
+static u8 *uip_get_option(struct uip_dhcp *dhcp, u8 match, int *olen)
 {
-	return (dhcp->option[2] == UIP_DHCP_DISCOVER &&
-		dhcp->option[1] == UIP_DHCP_TAG_MSG_TYPE_LEN &&
-		dhcp->option[0] == UIP_DHCP_TAG_MSG_TYPE);
+	u8 *opt_end = ((u8 *)dhcp) + ntohs(dhcp->udp.len);
+	u8 *opt = dhcp->option;
+
+	while (*opt != 0xFF) {
+		if (*opt == 0) {
+			opt++;
+			continue;
+		}
+		if (*opt == match) {
+			*olen = *++opt;
+			return ++opt;
+		}
+		opt += 2 + opt[1];
+		if (opt >= opt_end)
+			return NULL;
+	}
+	return NULL;
 }
 
-static inline bool uip_dhcp_is_request(struct uip_dhcp *dhcp)
+static bool uip_dhcp_is_discovery(struct uip_dhcp *dhcp)
 {
-	return (dhcp->option[2] == UIP_DHCP_REQUEST &&
-		dhcp->option[1] == UIP_DHCP_TAG_MSG_TYPE_LEN &&
-		dhcp->option[0] == UIP_DHCP_TAG_MSG_TYPE);
+	int olen;
+	u8 * opt = uip_get_option(dhcp, UIP_DHCP_TAG_MSG_TYPE, &olen);
+
+	printf("Check discovery\n");
+	if (opt == NULL || olen != UIP_DHCP_TAG_MSG_TYPE_LEN)
+		return false;
+	if (*opt != UIP_DHCP_DISCOVER)
+		return false;
+	printf("Discovery\n");
+	return true;
 }
+
+static bool uip_dhcp_is_request(struct uip_dhcp *dhcp)
+{
+	int olen;
+	u8 * opt = uip_get_option(dhcp, UIP_DHCP_TAG_MSG_TYPE, &olen);
+	printf("Check response\n");
+	if (opt == NULL || olen != UIP_DHCP_TAG_MSG_TYPE_LEN)
+		return false;
+	if (*opt != UIP_DHCP_REQUEST)
+		return false;
+	printf("Response\n");
+	return true;
+}
+
 
 bool uip_udp_is_dhcp(struct uip_udp *udp)
 {
