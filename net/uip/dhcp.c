@@ -209,7 +209,7 @@ int uip_tx_do_ipv4_udp_dhcp(struct uip_tx_arg *arg)
 	u8 reply_msg_type;
 
 	ip = (struct uip_ip *)arg->eth;
-	dhcp = (struct uip_dhcp *)(((uint8_t *)ip) + uip_ip_hdrlen(ip));
+	dhcp = (struct uip_dhcp *)(((uint8_t *)ip) + uip_ip_hdrlen(ip) + 14); /* 14 is ethernet header */
 
 	if (uip_dhcp_is_discovery(dhcp))
 		reply_msg_type = UIP_DHCP_OFFER;
