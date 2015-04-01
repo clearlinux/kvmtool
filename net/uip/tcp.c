@@ -161,8 +161,9 @@ static struct uip_tcp_socket *uip_tcp_socket_alloc(struct uip_tx_arg *arg, u32 s
 
 	ret = connect(sk->fd, (struct sockaddr *)&sk->addr, sizeof(sk->addr));
 	if (ret) {
-		perror("connect");
-		uip_tcp_payload_send(sk, UIP_TCP_FLAG_RST, 0);
+		sk->ack_server = ntohl(tcp->seq) + 1;
+		sk->seq_server = 0;
+		uip_tcp_payload_send(sk, UIP_TCP_FLAG_RST|UIP_TCP_FLAG_ACK, 0);
 		free(sk);
 		return NULL;
 	}
