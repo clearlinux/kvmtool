@@ -21,6 +21,9 @@
 #include <stdio.h>
 #include <fcntl.h>
 
+#include <elf.h>
+#include "kvm/e820.h"
+
 struct kvm_ext kvm_req_ext[] = {
 	{ DEFINE_KVM_EXT(KVM_CAP_COALESCED_MMIO) },
 	{ DEFINE_KVM_EXT(KVM_CAP_SET_TSS_ADDR) },
@@ -231,6 +234,188 @@ int load_flat_binary(struct kvm *kvm, int fd_kernel, int fd_initrd, const char *
 	kvm->arch.boot_sp	= BOOT_LOADER_SP;
 
 	return true;
+}
+
+static int load_elf32_binary(struct kvm *kvm, int fd_kernel, int fd_initrd,
+		const char *kernel_cmdline)
+{
+	return false;
+}
+
+static int load_elf64_binary(struct kvm *kvm, int fd_kernel, int fd_initrd,
+		const char *kernel_cmdline)
+{
+	int ret = false;
+	ssize_t numb;
+	size_t buflen;
+	uint32_t cmdline_size;
+	char *cmdline;
+	struct boot_params *zero_page = NULL;
+	Elf64_Off ph_off;
+	Elf64_Half ph_entsz;
+	Elf64_Half ph_cnt;
+	Elf64_Half ph_i;
+	Elf64_Phdr *phdr = NULL;
+	Elf64_Ehdr hdr;
+
+	numb = pread_in_full(fd_kernel, &hdr, sizeof(Elf64_Ehdr), 0);
+	if (numb < 0 || (size_t)numb != sizeof(Elf64_Ehdr)) {
+		pr_warning("unable to read ELF64 hdr: %s\n", strerror(errno));
+		goto done;
+	}
+	ph_off = hdr.e_phoff;
+	ph_entsz = hdr.e_phentsize;
+	ph_cnt = hdr.e_phnum;
+	buflen = ph_entsz * ph_cnt;
+
+	phdr = malloc(buflen);
+	if (!phdr) {
+		pr_warning("unable to allocate program header buffer\n");
+		goto done;
+	}
+
+	numb = pread_in_full(fd_kernel, phdr, buflen, ph_off);
+	if (numb < 0 || (size_t)numb != buflen) {
+		pr_warning("unable to read program header: %s\n",
+			strerror(errno));
+		goto done_0;
+	}
+
+	/* FIXME mmap */
+	for (ph_i = 0; ph_i < ph_cnt; ph_i++) {
+		char *dst;
+		size_t off = phdr[ph_i].p_offset;
+		size_t len = phdr[ph_i].p_filesz;
+		uint64_t addr = phdr[ph_i].p_paddr;
+
+		if ((phdr[ph_i].p_type & PT_LOAD) == 0)
+			continue;
+
+		dst = guest_flat_to_host(kvm, addr);
+
+		numb = pread_in_full(fd_kernel, dst, len, off);
+		if (numb < 0 || (size_t)numb != len) {
+			pr_warning("unable to load segment: %s\n",
+				strerror(errno));
+			goto done_0;
+		}
+	}
+
+	cmdline = guest_flat_to_host(kvm, BOOT_CMDLINE_OFFSET);
+	if (!kernel_cmdline) {
+		kernel_cmdline = "auto";
+	}
+	cmdline_size = strlen(kernel_cmdline)+1;
+	memset(cmdline, 0, cmdline_size);
+	memcpy(cmdline, kernel_cmdline, cmdline_size - 1);
+
+#define BOOT_ZEROPAGE_OFFSET	0x7E00
+	zero_page = guest_flat_to_host(kvm, BOOT_ZEROPAGE_OFFSET);
+	memset(zero_page, 0, sizeof(struct boot_params));
+	zero_page->hdr.type_of_loader = 0xFF;
+	zero_page->hdr.boot_flag = 0xAA55;
+	zero_page->hdr.header = 0x53726448;
+	zero_page->hdr.cmd_line_ptr = BOOT_CMDLINE_OFFSET;
+	zero_page->hdr.cmdline_size = cmdline_size;
+
+	zero_page->e820_entries++;
+	zero_page->e820_map[0].addr =  REAL_MODE_IVT_BEGIN;
+	zero_page->e820_map[0].size =  EBDA_START - REAL_MODE_IVT_BEGIN;
+	zero_page->e820_map[0].type = E820_RAM;
+
+	zero_page->e820_entries++;
+	zero_page->e820_map[1].addr =  EBDA_START;
+	zero_page->e820_map[1].size =  VGA_RAM_BEGIN - EBDA_START;
+	zero_page->e820_map[1].type =  E820_RESERVED;
+
+	zero_page->e820_entries++;
+	zero_page->e820_map[2].addr = MB_BIOS_BEGIN;
+	zero_page->e820_map[2].size = MB_BIOS_END - MB_BIOS_BEGIN;
+	zero_page->e820_map[2].type = E820_RESERVED;
+
+	if (kvm->ram_size < KVM_32BIT_GAP_START) {
+		zero_page->e820_entries++;
+		zero_page->e820_map[3].addr = BZ_KERNEL_START;
+		zero_page->e820_map[3].size = kvm->ram_size - BZ_KERNEL_START;
+		zero_page->e820_map[3].type = E820_RAM;
+	} else {
+		zero_page->e820_entries++;
+		zero_page->e820_map[3].addr = BZ_KERNEL_START;
+		zero_page->e820_map[3].size = KVM_32BIT_GAP_START -
+			BZ_KERNEL_START;
+		zero_page->e820_map[3].type = E820_RAM;
+
+		zero_page->e820_entries++;
+		zero_page->e820_map[4].addr = KVM_32BIT_MAX_MEM_SIZE;
+		zero_page->e820_map[4].size = kvm->ram_size -
+			KVM_32BIT_MAX_MEM_SIZE;
+		zero_page->e820_map[4].type = E820_RAM;
+	}
+
+
+	/*
+	 * normally, we would jump to real-mode code (either the bootloader or
+	 * the setup code in the bzImage. There's not point in doing that here,
+	 * as we've already setup the zero page, so let's just setup protected
+	 * mode and go straight into the kernel.
+	 *
+	 * startup_64 expect:
+	 *	- CS.L=1 and CS.D = 0
+	 *		0) start from protected mode, disable paging
+	 *		1) enable PAE (CR4.PAE = 1)
+	 *		2) load cr3 w/ PML4
+	 *		3) set IA32_EFER.LME=1
+	 *		4) enable paging CR0.PG=1
+	 *	- identity mapped page tables
+	 *	- rsi has real_mode_data ptr
+	 */
+
+	kvm->arch.boot_protected = true;
+	kvm->arch.boot_64 = true;
+
+	kvm->arch.boot_ip = hdr.e_entry;
+	kvm->arch.boot_sp = BOOT_LOADER_SP;
+	kvm->arch.boot_si = BOOT_ZEROPAGE_OFFSET;
+
+	ret = true;
+
+done_0:
+	free(phdr);
+done:
+	return ret;
+}
+
+int load_elf_binary(struct kvm *kvm, int fd_kernel, int fd_initrd,
+		const char *kernel_cmdline)
+{
+	unsigned char class;
+	int nr;
+	char ident[EI_NIDENT];
+
+	if (lseek(fd_kernel, 0, SEEK_SET))
+		return false;
+
+	nr = read(fd_kernel, &ident, sizeof(ident));
+	if (nr != sizeof(ident))
+		return false;
+
+	if (strncmp(ident, ELFMAG, SELFMAG))
+		return false;
+
+	class = ident[EI_CLASS];
+	if (class != ELFCLASS32 && class != ELFCLASS64)
+		return false;
+
+	if (ident[EI_DATA] != ELFDATA2LSB)
+		return false;
+
+	if (class == ELFCLASS32) {
+		return load_elf32_binary(kvm, fd_kernel, fd_initrd,
+			kernel_cmdline);
+	} else {
+		return load_elf64_binary(kvm, fd_kernel, fd_initrd,
+			kernel_cmdline);
+	}
 }
 
 static const char *BZIMAGE_MAGIC = "HdrS";

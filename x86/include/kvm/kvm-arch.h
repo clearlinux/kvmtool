@@ -32,8 +32,12 @@
 
 struct kvm_arch {
 	u16			boot_selector;
-	u16			boot_ip;
-	u16			boot_sp;
+	u64			boot_ip;
+	u64			boot_sp;
+	u64			boot_si;
+
+	bool			boot_protected;
+	bool			boot_64;
 
 	struct interrupt_table	interrupt_table;
 };
