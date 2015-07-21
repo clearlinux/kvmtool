@@ -386,7 +386,6 @@ bool kvm__load_kernel(struct kvm *kvm, const char *kernel_filename,
 	if (ret)
 		goto found_kernel;
 
-	pr_warning("%s is not a bzImage. Trying to load it as a flat binary...", kernel_filename);
 #endif
 
 	ret = load_elf_binary(kvm, fd_kernel, fd_initrd, kernel_cmdline);

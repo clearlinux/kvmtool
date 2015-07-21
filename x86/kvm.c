@@ -127,8 +127,12 @@ void kvm__arch_set_cmdline(char *cmdline, bool video)
 				"i8042.dumbkbd=1 i8042.nopnp=1");
 	if (video)
 		strcat(cmdline, " video=vesafb console=tty0");
-	else
-		strcat(cmdline, " console=ttyS0 earlyprintk=serial i8042.noaux=1");
+	else {
+		strcat(cmdline, " console=ttyS0 i8042.noaux=1");
+		if (do_debug_print) {
+			strcat(cmdline, " earlyprintk=serial");
+		}
+	}
 }
 
 /* Architecture-specific KVM init */
