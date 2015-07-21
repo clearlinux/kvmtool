@@ -609,7 +609,7 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 		}
 	}
 
-	if (!kvm->cfg.using_rootfs && !kvm->cfg.disk_image[0].filename && !kvm->cfg.initrd_filename) {
+	if (0 && !kvm->cfg.using_rootfs && !kvm->cfg.disk_image[0].filename && !kvm->cfg.initrd_filename) {
 		char tmp[PATH_MAX];
 
 		kvm_setup_create_new(kvm->cfg.custom_rootfs_name);
