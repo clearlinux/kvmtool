@@ -14,6 +14,10 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #define MB_SHIFT (20)
 #define KB_SHIFT (10)
 #define GB_SHIFT (30)
@@ -377,6 +381,16 @@ int shmem_parser(const struct option *opt, const char *arg, int unset)
 		else
 			p = next + 1;
 		file = 1;
+	}
+	if (file == 1) {
+		struct stat buf;
+		if (stat(handle, &buf)==0) {
+			size = (unsigned long long) buf.st_size;
+			if (verbose)
+				pr_info("shmem: using actual file size %lld, 0x%llx\n", (unsigned long long) size, (unsigned long long) size);
+		} else {
+			die("cannot stat file specified in file=\n");
+		}
 	}
 	next = strcasestr(p, "private");
 	if (*p && next) {
