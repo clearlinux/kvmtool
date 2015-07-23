@@ -730,6 +730,9 @@ static int set_net_param(struct kvm *kvm, struct virtio_net_params *p,
 		p->mq = atoi(val);
 	} else
 		die("Unknown network parameter %s", param);
+	if (p->vhost && p->mq > 1)
+		die("vhost does not support mq yet");
+
 
 	return 0;
 }
