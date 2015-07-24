@@ -674,7 +674,7 @@ static void kvm_cmd_run_exit(struct kvm *kvm, int guest_ret)
 
 	init_list__exit(kvm);
 
-	if (guest_ret == 0)
+	if (guest_ret == 0 && do_debug_print)
 		printf("\n  # KVM session ended normally.\n");
 }
 
