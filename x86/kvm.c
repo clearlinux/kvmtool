@@ -356,6 +356,31 @@ static int load_elf64_binary(struct kvm *kvm, int fd_kernel, int fd_initrd,
 		zero_page->e820_map[4].type = E820_RAM;
 	}
 
+	if (fd_initrd >= 0) {
+		struct stat initrd_stat;
+		unsigned long addr;
+		void *p;
+		int nr;
+
+		if (fstat(fd_initrd, &initrd_stat))
+			die_perror("fstat");
+
+		/* boot.hdr.initrd_addr_max is 0x7fffffff */
+		addr = 0x7fffffff & ~0xfffff;
+		for (;;) {
+			if (addr < (kvm->ram_size - initrd_stat.st_size))
+				break;
+			addr -= 0x100000;
+		}
+
+		p = guest_flat_to_host(kvm, addr);
+		nr = read(fd_initrd, p, initrd_stat.st_size);
+		if (nr != initrd_stat.st_size)
+			die("Failed to read initrd");
+
+		zero_page->hdr.ramdisk_image	= addr;
+		zero_page->hdr.ramdisk_size	= initrd_stat.st_size;
+	}
 
 	/*
 	 * normally, we would jump to real-mode code (either the bootloader or
