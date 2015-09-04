@@ -16,8 +16,13 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
+#ifdef CONFIG_HAS_LIBC
 extern char _binary_guest_init_start;
 extern char _binary_guest_init_size;
+#else
+static char _binary_guest_init_start=0;
+static char _binary_guest_init_size=0;
+#endif
 
 static const char *instance_name;
 
@@ -131,6 +136,8 @@ static int copy_init(const char *guestfs_name)
 	int fd, ret;
 	char *data;
 
+	if (!_binary_guest_init_size)
+		die("Guest init not compiled");
 	size = (size_t)&_binary_guest_init_size;
 	data = (char *)&_binary_guest_init_start;
 	snprintf(path, PATH_MAX, "%s%s/virt/init", kvm__get_dir(), guestfs_name);

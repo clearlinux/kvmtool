@@ -59,8 +59,13 @@ static int  kvm_run_wrapper;
 
 bool do_debug_print = false;
 
+#ifdef CONFIG_HAS_LIBC
 extern char _binary_guest_init_start;
 extern char _binary_guest_init_size;
+#else
+static char _binary_guest_init_start=0;
+static char _binary_guest_init_size=0;
+#endif
 
 static const char * const run_usage[] = {
 	"lkvm run [<options>] [<kernel image>]",
@@ -355,6 +360,8 @@ static int kvm_setup_guest_init(struct kvm *kvm)
 	char *data;
 
 	/* Setup /virt/init */
+	if (!_binary_guest_init_size)
+		die("Guest init not compiled");
 	size = (size_t)&_binary_guest_init_size;
 	data = (char *)&_binary_guest_init_start;
 	snprintf(tmp, PATH_MAX, "%s%s/virt/init", kvm__get_dir(), rootfs);

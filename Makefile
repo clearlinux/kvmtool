@@ -34,8 +34,6 @@ bindir_SQ = $(subst ','\'',$(bindir))
 PROGRAM	:= lkvm
 PROGRAM_ALIAS := vm
 
-GUEST_INIT := guest/init
-
 OBJS	+= builtin-balloon.o
 OBJS	+= builtin-debug.o
 OBJS	+= builtin-help.o
@@ -274,8 +272,12 @@ ifeq ($(LTO),1)
 	endif
 endif
 
-ifneq ($(call try-build,$(SOURCE_STATIC),,-static),y)
-        $(error No static libc found. Please install glibc-static package.)
+ifeq ($(call try-build,$(SOURCE_STATIC),,-static),y)
+	CFLAGS        	+= -DCONFIG_HAS_LIBC
+	GUEST_INIT := guest/init
+	GUEST_OBJS = guest/guest_init.o
+else
+	NOTFOUND        += static-libc
 endif
 
 ifeq (y,$(ARCH_WANT_LIBFDT))
@@ -350,7 +352,6 @@ c_flags	= -Wp,-MD,$(depfile) $(CFLAGS)
 # $(OTHEROBJS) are things that do not get substituted like this.
 #
 STATIC_OBJS = $(patsubst %.o,%.static.o,$(OBJS) $(OBJS_STATOPT))
-GUEST_OBJS = guest/guest_init.o
 
 $(PROGRAM)-static:  $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_INIT)
 	$(E) "  LINK    " $@
