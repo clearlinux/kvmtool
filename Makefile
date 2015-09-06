@@ -343,7 +343,7 @@ WARNINGS += -Wvolatile-register-var
 WARNINGS += -Wwrite-strings
 WARNINGS += -Wno-format-nonliteral
 
-CFLAGS	+= $(WARNINGS) -DCONFIG_HAS_AIO
+CFLAGS	+= $(WARNINGS)
 
 ifneq ($(WERROR),0)
 	CFLAGS += -Werror
