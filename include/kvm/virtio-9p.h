@@ -66,6 +66,7 @@ struct p9_pdu {
 
 struct kvm;
 
+int virtio_9p_rootdir_handle(struct kvm *kvm, const char *arg);
 int virtio_9p_rootdir_parser(const struct option *opt, const char *arg, int unset);
 int virtio_9p_img_name_parser(const struct option *opt, const char *arg, int unset);
 int virtio_9p__register(struct kvm *kvm, const char *root, const char *tag_name);

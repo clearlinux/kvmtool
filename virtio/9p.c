@@ -1467,11 +1467,10 @@ struct virtio_ops p9_dev_virtio_ops = (struct virtio_ops) {
 	.set_size_vq		= set_size_vq,
 };
 
-int virtio_9p_rootdir_parser(const struct option *opt, const char *arg, int unset)
+int virtio_9p_rootdir_handle(struct kvm *kvm, const char *arg)
 {
 	char *tag_name;
 	char tmp[PATH_MAX];
-	struct kvm *kvm = opt->ptr;
 
 	/*
 	 * 9p dir can be of the form dirname,tag_name or
@@ -1489,6 +1488,11 @@ int virtio_9p_rootdir_parser(const struct option *opt, const char *arg, int unse
 	} else
 		die("Failed resolving 9p path");
 	return 0;
+}
+
+int virtio_9p_rootdir_parser(const struct option *opt, const char *arg, int unset)
+{
+	return virtio_9p_rootdir_handle((struct kvm *)opt->ptr, arg);
 }
 
 int virtio_9p_img_name_parser(const struct option *opt, const char *arg, int unset)
