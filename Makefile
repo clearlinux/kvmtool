@@ -98,6 +98,7 @@ OBJS	+= kvm-ipc.o
 OBJS	+= builtin-sandbox.o
 OBJS	+= virtio/mmio.o
 OBJS	+= hw/i8042.o
+OBJS	+= oci/oci.o
 
 # Translate uname -m into ARCH string
 ARCH ?= $(shell uname -m | sed -e s/i.86/i386/ -e s/ppc.*/powerpc/ \
@@ -301,6 +302,14 @@ LIBS	+= -lrt
 LIBS	+= -lpthread
 LIBS	+= -lutil
 
+CFLAGS_JSON_C := $(shell pkg-config --cflags json-c 2>/dev/null)
+LDFLAGS_JSON_C := $(shell pkg-config --libs json-c 2>/dev/null)
+
+CFLAGS  += $(CFLAGS_JSON_C)
+LIBS	+= $(LDFLAGS_JSON_C)
+
+# FIXME: for asm/e820.h building on Ubuntu vivid.
+CFLAGS  += -I/usr/include/$(shell arch)-linux-gnu
 
 comma = ,
 
@@ -329,7 +338,9 @@ WARNINGS += -Wold-style-definition
 WARNINGS += -Wredundant-decls
 WARNINGS += -Wsign-compare
 WARNINGS += -Wstrict-prototypes
-WARNINGS += -Wundef
+
+# FIXME: json-c needs __STDC_VERSION__ to be defined
+##WARNINGS += -Wundef
 WARNINGS += -Wvolatile-register-var
 WARNINGS += -Wwrite-strings
 

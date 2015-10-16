@@ -34,6 +34,7 @@
 #include "kvm/pci-shmem.h"
 #include "kvm/kvm-ipc.h"
 #include "kvm/builtin-debug.h"
+#include "kvm/oci.h"
 
 #include <linux/types.h>
 #include <linux/err.h>
@@ -155,6 +156,14 @@ void kvm_run_set_wrapper_sandbox(void)
 	OPT_BOOLEAN('\0', "no-dhcp", &(cfg)->no_dhcp, "Disable kernel"	\
 			" DHCP in rootfs mode"),			\
 									\
+	OPT_GROUP("OCI (Open Container Initiative) options:"),		\
+	OPT_STRING('\0', "oci-id", &(cfg)->guest_name, "guest name",	\
+			"A name for the guest (alias for --name)"),	\
+	OPT_STRING('\0', "oci-config", &(cfg)->oci_config_path, "path",	\
+			"OCI JSON config file path"),			\
+	OPT_STRING('\0', "oci-runtime", &(cfg)->oci_runtime_path, "path",\
+			"OCI JSON runtime config file path"),		\
+									\
 	OPT_GROUP("Debug options:"),					\
 	OPT_BOOLEAN('\0', "debug", &do_debug_print,			\
 			"Enable debug messages"),			\
@@ -166,6 +175,13 @@ void kvm_run_set_wrapper_sandbox(void)
 			"Enable MMIO debugging"),			\
 	OPT_INTEGER('\0', "debug-iodelay", &(cfg)->debug_iodelay,	\
 			"Delay IO by millisecond"),			\
+	OPT_BOOLEAN('\0', "check", &(cfg)->check_only,			\
+			"Check config only and exit "			\
+			"(requires --oci-config and --oci-runtime)"),	\
+	OPT_BOOLEAN('\0', "no-oci-path-checks",				\
+		       	&(cfg)->no_oci_path_checks,			\
+			"Do not require OCI config paths to exist "	\
+			"(requires --check)"),				\
 									\
 	OPT_ARCH(RUN, cfg)						\
 	OPT_END()							\
@@ -489,6 +505,7 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	static char real_cmdline[2048], default_name[20];
 	unsigned int nr_online_cpus;
 	struct kvm *kvm = kvm__new();
+	int ret;
 
 	if (IS_ERR(kvm))
 		return kvm;
@@ -538,6 +555,22 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 		}
 
 	}
+
+	if (!kvm->cfg.guest_name) {
+		if (kvm->cfg.custom_rootfs) {
+			kvm->cfg.guest_name = kvm->cfg.custom_rootfs_name;
+		} else {
+			sprintf(default_name, "guest-%u", getpid());
+			kvm->cfg.guest_name = default_name;
+		}
+	}
+
+	/* Check for oci mode and handle required setup (after handling
+	 * generic setup first).
+	 */
+	ret = kvm_oci_setup(kvm);
+	if (ret < 0)
+		return ERR_PTR(-EINVAL);
 
 	kvm->nr_disks = kvm->cfg.image_count;
 
@@ -607,15 +640,6 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	if (kvm->cfg.kernel_cmdline)
 		strlcat(real_cmdline, kvm->cfg.kernel_cmdline, sizeof(real_cmdline));
 
-	if (!kvm->cfg.guest_name) {
-		if (kvm->cfg.custom_rootfs) {
-			kvm->cfg.guest_name = kvm->cfg.custom_rootfs_name;
-		} else {
-			sprintf(default_name, "guest-%u", getpid());
-			kvm->cfg.guest_name = default_name;
-		}
-	}
-
 	if (0 && !kvm->cfg.using_rootfs && !kvm->cfg.disk_image[0].filename && !kvm->cfg.initrd_filename) {
 		char tmp[PATH_MAX];
 
@@ -649,10 +673,14 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	kvm->cfg.real_cmdline = real_cmdline;
 
 	if (do_debug_print) {
-		printf("  # %s run -k %s -m %Lu -c %d --name %s\n", KVM_BINARY_NAME,
-		       kvm->cfg.kernel_filename,
-		       (unsigned long long)kvm->cfg.ram_size / 1024 / 1024,
-		       kvm->cfg.nrcpus, kvm->cfg.guest_name);
+		if (kvm->cfg.oci_mode) {
+			kvm_oci_show_summary(kvm);
+		} else {
+			printf("  # %s run -k %s -m %Lu -c %d --name %s\n", KVM_BINARY_NAME,
+					kvm->cfg.kernel_filename,
+					(unsigned long long)kvm->cfg.ram_size / 1024 / 1024,
+					kvm->cfg.nrcpus, kvm->cfg.guest_name);
+		}
 	}
 
 	if (init_list__init(kvm) < 0)
@@ -675,14 +703,19 @@ static int kvm_cmd_run_work(struct kvm *kvm)
 	return pthread_join(kvm->cpus[0]->thread, &ret);
 }
 
-static void kvm_cmd_run_exit(struct kvm *kvm, int guest_ret)
+static int kvm_cmd_run_exit(struct kvm *kvm, int guest_ret)
 {
 	compat__print_all_messages();
 
 	init_list__exit(kvm);
 
+	if (kvm->cfg.oci_mode && kvm_oci_cleanup(kvm) < 0)
+		return pr_err("Failed to cleanup OCI environment");
+
 	if (guest_ret == 0 && do_debug_print)
 		printf("\n  # KVM session ended normally.\n");
+
+	return guest_ret;
 }
 
 int kvm_cmd_run(int argc, const char **argv, const char *prefix)
@@ -695,7 +728,5 @@ int kvm_cmd_run(int argc, const char **argv, const char *prefix)
 		return PTR_ERR(kvm);
 
 	ret = kvm_cmd_run_work(kvm);
-	kvm_cmd_run_exit(kvm, ret);
-
-	return ret;
+	return kvm_cmd_run_exit(kvm, ret);
 }
