@@ -308,6 +308,8 @@ LIBS	+= -lrt
 LIBS	+= -lpthread
 LIBS	+= -lutil
 
+# FIXME: for asm/e820.h building on Ubuntu vivid.
+CFLAGS  += -I/usr/include/x86_64-linux-gnu
 
 comma = ,
 
