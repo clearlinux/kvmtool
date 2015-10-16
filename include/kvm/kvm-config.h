@@ -45,6 +45,8 @@ struct kvm_config {
 	const char *hugetlbfs_path;
 	const char *custom_rootfs_name;
 	const char *real_cmdline;
+	const char *oci_config_path;
+	const char *oci_runtime_path;
 	struct virtio_net_params *net_params;
 	bool single_step;
 	bool vnc;
@@ -57,6 +59,9 @@ struct kvm_config {
 	bool no_dhcp;
 	bool ioport_debug;
 	bool mmio_debug;
+	bool check_only;
+	bool oci_mode;
+	bool no_oci_path_checks;
 };
 
 #endif
