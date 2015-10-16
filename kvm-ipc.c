@@ -34,7 +34,7 @@ static pthread_t thread;
 static int kvm__create_socket(struct kvm *kvm)
 {
 	char full_name[PATH_MAX];
-	unsigned int s;
+	int s;
 	struct sockaddr_un local;
 	int len, r;
 
@@ -99,7 +99,7 @@ int kvm__get_sock_by_instance(const char *name)
 	strlcpy(local.sun_path, sock_file, sizeof(local.sun_path));
 	len = strlen(local.sun_path) + sizeof(local.sun_family);
 
-	r = connect(s, &local, len);
+	r = connect(s, (struct sockaddr *)&local, len);
 	if (r < 0 && errno == ECONNREFUSED) {
 		/* Tell the user clean ghost socket file */
 		pr_err("\"%s\" could be a ghost socket file, please remove it",

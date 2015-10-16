@@ -101,7 +101,7 @@ OBJS	+= hw/i8042.o
 
 # Translate uname -m into ARCH string
 ARCH ?= $(shell uname -m | sed -e s/i.86/i386/ -e s/ppc.*/powerpc/ \
-	  -e s/armv7.*/arm/ -e s/aarch64.*/arm64/ -e s/mips64/mips/)
+	  -e s/armv.*/arm/ -e s/aarch64.*/arm64/ -e s/mips64/mips/)
 
 ifeq ($(ARCH),i386)
 	ARCH         := x86
@@ -197,6 +197,11 @@ endif
 # On a given system, some libs may link statically, some may not; so, check
 # both and only build those that link!
 
+ifeq ($(call try-build,$(SOURCE_STRLCPY),$(CFLAGS),),y)
+	CFLAGS_DYNOPT	+= -DHAVE_STRLCPY
+	CFLAGS_STATOPT	+= -DHAVE_STRLCPY
+endif
+
 ifeq ($(call try-build,$(SOURCE_BFD),$(CFLAGS),-lbfd -static),y)
 	CFLAGS_STATOPT	+= -DCONFIG_HAS_BFD
 	OBJS_STATOPT	+= symbol.o
@@ -273,10 +278,12 @@ ifeq ($(LTO),1)
 endif
 
 ifeq ($(call try-build,$(SOURCE_STATIC),,-static),y)
-	CFLAGS        	+= -DCONFIG_HAS_LIBC
+	CFLAGS		+= -DCONFIG_GUEST_INIT
+	CFLAGS      += -DCONFIG_HAS_LIBC
 	GUEST_INIT := guest/init
 	GUEST_OBJS = guest/guest_init.o
 else
+	$(warning No static libc found. Skipping guest init)
 	NOTFOUND        += static-libc
 endif
 
@@ -332,6 +339,7 @@ WARNINGS += -Wstrict-prototypes
 WARNINGS += -Wundef
 WARNINGS += -Wvolatile-register-var
 WARNINGS += -Wwrite-strings
+WARNINGS += -Wno-format-nonliteral
 
 CFLAGS	+= $(WARNINGS) -DCONFIG_HAS_AIO
 
@@ -422,15 +430,15 @@ x86/bios.o: x86/bios/bios.bin x86/bios/bios-rom.h
 
 x86/bios/bios.bin.elf: x86/bios/entry.S x86/bios/e820.c x86/bios/int10.c x86/bios/int15.c x86/bios/rom.ld.S
 	$(E) "  CC       x86/bios/memcpy.o"
-	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c -s x86/bios/memcpy.c -o x86/bios/memcpy.o
+	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c x86/bios/memcpy.c -o x86/bios/memcpy.o
 	$(E) "  CC       x86/bios/e820.o"
-	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c -s x86/bios/e820.c -o x86/bios/e820.o
+	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c x86/bios/e820.c -o x86/bios/e820.o
 	$(E) "  CC       x86/bios/int10.o"
-	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c -s x86/bios/int10.c -o x86/bios/int10.o
+	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c x86/bios/int10.c -o x86/bios/int10.o
 	$(E) "  CC       x86/bios/int15.o"
-	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c -s x86/bios/int15.c -o x86/bios/int15.o
+	$(Q) $(CC) -include code16gcc.h $(CFLAGS) $(BIOS_CFLAGS) -c x86/bios/int15.c -o x86/bios/int15.o
 	$(E) "  CC       x86/bios/entry.o"
-	$(Q) $(CC) $(CFLAGS) $(BIOS_CFLAGS) -c -s x86/bios/entry.S -o x86/bios/entry.o
+	$(Q) $(CC) $(CFLAGS) $(BIOS_CFLAGS) -c x86/bios/entry.S -o x86/bios/entry.o
 	$(E) "  LD      " $@
 	$(Q) $(LD) -T x86/bios/rom.ld.S -o x86/bios/bios.bin.elf x86/bios/memcpy.o x86/bios/entry.o x86/bios/e820.o x86/bios/int10.o x86/bios/int15.o
 
