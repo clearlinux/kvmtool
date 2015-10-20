@@ -108,9 +108,9 @@ int uip_udp_make_pkg(struct uip_info *info, struct uip_udp_socket *sk, struct ui
 	/*
 	 * Cook a ethernet frame
 	 */
-	udp2		= (struct uip_udp *)(buf->eth);
 	eth2		= (struct uip_eth *)buf->eth;
 	ip2		= (struct uip_ip *)(buf->eth);
+	udp2		= (struct uip_udp *)(ip2 + 1);
 
 	eth2->src	= info->host_mac;
 	eth2->dst	= info->guest_mac;
@@ -137,7 +137,7 @@ int uip_udp_make_pkg(struct uip_info *info, struct uip_udp_socket *sk, struct ui
 
 	ip2->len	= udp2->len + htons(uip_ip_hdrlen(ip2));
 	ip2->csum	= uip_csum_ip(ip2);
-	udp2->csum	= uip_csum_udp(udp2);
+	udp2->csum	= uip_csum_udp(ip2, udp2);
 
 	/*
 	 * virtio_net_hdr
@@ -209,8 +209,8 @@ int uip_tx_do_ipv4_udp(struct uip_tx_arg *arg)
 	struct uip_ip *ip;
 	int ret;
 
-	udp	= (struct uip_udp *)(arg->eth);
 	ip	= (struct uip_ip *)(arg->eth);
+	udp	= uip_ip_proto(ip);
 	info	= arg->info;
 
 	if (uip_udp_is_dhcp(udp)) {
@@ -230,6 +230,7 @@ int uip_tx_do_ipv4_udp(struct uip_tx_arg *arg)
 	 */
 	ret = uip_udp_socket_send(sk, udp);
 	if (ret)
+		/* FIXME: icmp port unreach */
 		return -1;
 
 	if (!info->udp_thread)

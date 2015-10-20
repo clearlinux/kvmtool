@@ -6,11 +6,6 @@ int uip_tx_do_ipv4(struct uip_tx_arg *arg)
 
 	ip = (struct uip_ip *)(arg->eth);
 
-	if (uip_ip_hdrlen(ip) != 20) {
-		pr_warning("IP header length is not 20 bytes");
-		return -1;
-	}
-
 	switch (ip->proto) {
 	case UIP_IP_P_ICMP:
 		uip_tx_do_ipv4_icmp(arg);

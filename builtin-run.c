@@ -59,6 +59,14 @@ static int  kvm_run_wrapper;
 
 bool do_debug_print = false;
 
+#ifdef CONFIG_HAS_LIBC
+extern char _binary_guest_init_start;
+extern char _binary_guest_init_size;
+#else
+static char _binary_guest_init_start=0;
+static char _binary_guest_init_size=0;
+#endif
+
 static const char * const run_usage[] = {
 	"lkvm run [<options>] [<kernel image>]",
 	NULL
@@ -100,7 +108,8 @@ void kvm_run_set_wrapper_sandbox(void)
 	OPT_U64('m', "mem", &(cfg)->ram_size, "Virtual machine memory"	\
 		" size in MiB."),					\
 	OPT_CALLBACK('\0', "shmem", NULL,				\
-		     "[pci:]<addr>:<size>[:handle=<handle>][:create]",	\
+		     "[pci:]<addr>:<size>[:handle=<handle>|:file=path]" \
+		     "[:private][:create]",				\
 		     "Share host shmem with guest via pci device",	\
 		     shmem_parser, NULL),				\
 	OPT_CALLBACK('d', "disk", kvm, "image or rootfs_dir", "Disk "	\
@@ -581,7 +590,7 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 		}
 	}
 
-	if (!kvm->cfg.using_rootfs && !kvm->cfg.disk_image[0].filename && !kvm->cfg.initrd_filename) {
+	if (0 && !kvm->cfg.using_rootfs && !kvm->cfg.disk_image[0].filename && !kvm->cfg.initrd_filename) {
 		char tmp[PATH_MAX];
 
 		kvm_setup_create_new(kvm->cfg.custom_rootfs_name);
@@ -613,10 +622,12 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 
 	kvm->cfg.real_cmdline = real_cmdline;
 
-	printf("  # %s run -k %s -m %Lu -c %d --name %s\n", KVM_BINARY_NAME,
-		kvm->cfg.kernel_filename,
-		(unsigned long long)kvm->cfg.ram_size / 1024 / 1024,
-		kvm->cfg.nrcpus, kvm->cfg.guest_name);
+	if (do_debug_print) {
+		printf("  # %s run -k %s -m %Lu -c %d --name %s\n", KVM_BINARY_NAME,
+		       kvm->cfg.kernel_filename,
+		       (unsigned long long)kvm->cfg.ram_size / 1024 / 1024,
+		       kvm->cfg.nrcpus, kvm->cfg.guest_name);
+	}
 
 	if (init_list__init(kvm) < 0)
 		die ("Initialisation failed");
@@ -644,7 +655,7 @@ static void kvm_cmd_run_exit(struct kvm *kvm, int guest_ret)
 
 	init_list__exit(kvm);
 
-	if (guest_ret == 0)
+	if (guest_ret == 0 && do_debug_print)
 		printf("\n  # KVM session ended normally.\n");
 }
 

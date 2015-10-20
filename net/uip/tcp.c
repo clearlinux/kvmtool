@@ -45,54 +45,6 @@ static struct uip_tcp_socket *uip_tcp_socket_find(struct uip_tx_arg *arg, u32 si
 	return NULL;
 }
 
-static struct uip_tcp_socket *uip_tcp_socket_alloc(struct uip_tx_arg *arg, u32 sip, u32 dip, u16 sport, u16 dport)
-{
-	struct list_head *sk_head;
-	struct uip_tcp_socket *sk;
-	struct mutex *sk_lock;
-	struct uip_tcp *tcp;
-	struct uip_ip *ip;
-	int ret;
-
-	tcp = (struct uip_tcp *)arg->eth;
-	ip = (struct uip_ip *)arg->eth;
-
-	sk_head = &arg->info->tcp_socket_head;
-	sk_lock = &arg->info->tcp_socket_lock;
-
-	sk = malloc(sizeof(*sk));
-	memset(sk, 0, sizeof(*sk));
-
-	sk->lock			= sk_lock;
-	sk->info			= arg->info;
-
-	sk->fd				= socket(AF_INET, SOCK_STREAM, 0);
-	sk->addr.sin_family		= AF_INET;
-	sk->addr.sin_port		= dport;
-	sk->addr.sin_addr.s_addr	= dip;
-
-	pthread_cond_init(&sk->cond, NULL);
-
-	if (ntohl(dip) == arg->info->host_ip)
-		sk->addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-	ret = connect(sk->fd, (struct sockaddr *)&sk->addr, sizeof(sk->addr));
-	if (ret) {
-		free(sk);
-		return NULL;
-	}
-
-	sk->sip		= ip->sip;
-	sk->dip		= ip->dip;
-	sk->sport	= tcp->sport;
-	sk->dport	= tcp->dport;
-
-	mutex_lock(sk_lock);
-	list_add_tail(&sk->list, sk_head);
-	mutex_unlock(sk_lock);
-
-	return sk;
-}
 
 static int uip_tcp_payload_send(struct uip_tcp_socket *sk, u8 flag, u16 payload_len)
 {
@@ -112,9 +64,9 @@ static int uip_tcp_payload_send(struct uip_tcp_socket *sk, u8 flag, u16 payload_
 	/*
 	 * Cook a ethernet frame
 	 */
-	tcp2		= (struct uip_tcp *)buf->eth;
 	eth2		= (struct uip_eth *)buf->eth;
 	ip2		= (struct uip_ip *)buf->eth;
+	tcp2		= (struct uip_tcp *)(ip2 + 1);
 
 	eth2->src	= info->host_mac;
 	eth2->dst	= info->guest_mac;
@@ -148,7 +100,7 @@ static int uip_tcp_payload_send(struct uip_tcp_socket *sk, u8 flag, u16 payload_
 
 	ip2->len	= htons(uip_tcp_hdrlen(tcp2) + payload_len + uip_ip_hdrlen(ip2));
 	ip2->csum	= uip_csum_ip(ip2);
-	tcp2->csum	= uip_csum_tcp(tcp2);
+	tcp2->csum	= uip_csum_tcp(ip2, tcp2);
 
 	/*
 	 * virtio_net_hdr
@@ -171,6 +123,58 @@ static int uip_tcp_payload_send(struct uip_tcp_socket *sk, u8 flag, u16 payload_
 	return 0;
 }
 
+static struct uip_tcp_socket *uip_tcp_socket_alloc(struct uip_tx_arg *arg, u32 sip, u32 dip, u16 sport, u16 dport)
+{
+	struct list_head *sk_head;
+	struct uip_tcp_socket *sk;
+	struct mutex *sk_lock;
+	struct uip_tcp *tcp;
+	struct uip_ip *ip;
+	int ret;
+
+	ip = (struct uip_ip *)arg->eth;
+	tcp = (struct uip_tcp *)(ip + 1);
+
+	sk_head = &arg->info->tcp_socket_head;
+	sk_lock = &arg->info->tcp_socket_lock;
+
+	sk = malloc(sizeof(*sk));
+	memset(sk, 0, sizeof(*sk));
+
+	sk->lock			= sk_lock;
+	sk->info			= arg->info;
+
+	sk->fd				= socket(AF_INET, SOCK_STREAM, 0);
+	sk->addr.sin_family		= AF_INET;
+	sk->addr.sin_port		= dport;
+	sk->addr.sin_addr.s_addr	= dip;
+
+	pthread_cond_init(&sk->cond, NULL);
+
+	if (ntohl(dip) == arg->info->host_ip)
+		sk->addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+	sk->sip		= ip->sip;
+	sk->dip		= ip->dip;
+	sk->sport	= tcp->sport;
+	sk->dport	= tcp->dport;
+
+	ret = connect(sk->fd, (struct sockaddr *)&sk->addr, sizeof(sk->addr));
+	if (ret) {
+		sk->ack_server = ntohl(tcp->seq) + 1;
+		sk->seq_server = 0;
+		uip_tcp_payload_send(sk, UIP_TCP_FLAG_RST|UIP_TCP_FLAG_ACK, 0);
+		free(sk);
+		return NULL;
+	}
+
+	mutex_lock(sk_lock);
+	list_add_tail(&sk->list, sk_head);
+	mutex_unlock(sk_lock);
+
+	return sk;
+}
+
 static void *uip_tcp_socket_thread(void *p)
 {
 	struct uip_tcp_socket *sk;
@@ -190,7 +194,7 @@ static void *uip_tcp_socket_thread(void *p)
 
 		ret = read(sk->fd, payload, UIP_MAX_TCP_PAYLOAD);
 
-		if (ret <= 0 || ret > UIP_MAX_TCP_PAYLOAD)
+		if (ret <= 0 || ret > UIP_MAX_TCP_PAYLOAD || sk->dead)
 			goto out;
 
 		left = ret;
@@ -238,7 +242,8 @@ static int uip_tcp_socket_receive(struct uip_tcp_socket *sk)
 	return 0;
 }
 
-static int uip_tcp_socket_send(struct uip_tcp_socket *sk, struct uip_tcp *tcp)
+static int uip_tcp_socket_send(struct uip_tcp_socket *sk, struct uip_ip *ip,
+				struct uip_tcp *tcp)
 {
 	int len;
 	int ret;
@@ -248,7 +253,7 @@ static int uip_tcp_socket_send(struct uip_tcp_socket *sk, struct uip_tcp *tcp)
 		return 0;
 
 	payload = uip_tcp_payload(tcp);
-	len = uip_tcp_payloadlen(tcp);
+	len = uip_tcp_payloadlen(ip, tcp);
 
 	ret = write(sk->fd, payload, len);
 	if (ret != len)
@@ -264,44 +269,44 @@ int uip_tx_do_ipv4_tcp(struct uip_tx_arg *arg)
 	struct uip_ip *ip;
 	int ret;
 
-	tcp = (struct uip_tcp *)arg->eth;
 	ip = (struct uip_ip *)arg->eth;
-
-	/*
-	 * Guest is trying to start a TCP session, let's fake SYN-ACK to guest
-	 */
-	if (uip_tcp_is_syn(tcp)) {
-		sk = uip_tcp_socket_alloc(arg, ip->sip, ip->dip, tcp->sport, tcp->dport);
-		if (!sk)
-			return -1;
-
-		sk->window_size = ntohs(tcp->win);
-
-		/*
-		 * Setup ISN number
-		 */
-		sk->isn_guest  = uip_tcp_isn(tcp);
-		sk->isn_server = uip_tcp_isn_alloc();
-
-		sk->seq_server = sk->isn_server;
-		sk->ack_server = sk->isn_guest + 1;
-		uip_tcp_payload_send(sk, UIP_TCP_FLAG_SYN | UIP_TCP_FLAG_ACK, 0);
-		sk->seq_server += 1;
-
-		/*
-		 * Start receive thread for data from remote to guest
-		 */
-		uip_tcp_socket_receive(sk);
-
-		goto out;
-	}
+	tcp = uip_ip_proto(ip);
 
 	/*
 	 * Find socket we have allocated
 	 */
 	sk = uip_tcp_socket_find(arg, ip->sip, ip->dip, tcp->sport, tcp->dport);
-	if (!sk)
-		return -1;
+	if (!sk) {
+		/*
+		 * Guest is trying to start a TCP session, let's fake SYN-ACK to guest
+		 */
+		if (uip_tcp_is_syn(tcp) && !uip_tcp_is_rst(tcp)) {
+			sk = uip_tcp_socket_alloc(arg, ip->sip, ip->dip, tcp->sport, tcp->dport);
+			if (!sk)
+				return -1;
+			sk->window_size = ntohs(tcp->win);
+
+			/*
+			 * Setup ISN number
+			 */
+			sk->isn_guest  = uip_tcp_isn(tcp);
+			sk->isn_server = uip_tcp_isn_alloc();
+
+			sk->seq_server = sk->isn_server;
+			sk->ack_server = sk->isn_guest + 1;
+			uip_tcp_payload_send(sk,
+				UIP_TCP_FLAG_SYN | UIP_TCP_FLAG_ACK, 0);
+			sk->seq_server += 1;
+
+			/*
+			 * Start receive thread for data from remote to guest
+			 */
+			uip_tcp_socket_receive(sk);
+
+			goto out;
+		}
+	}
+
 
 	mutex_lock(sk->lock);
 	sk->window_size = ntohs(tcp->win);
@@ -309,6 +314,12 @@ int uip_tx_do_ipv4_tcp(struct uip_tx_arg *arg)
 	pthread_cond_signal(&sk->cond);
 	mutex_unlock(sk->lock);
 
+	if (uip_tcp_is_rst(tcp)) {
+		sk->dead = 1;
+		goto out;
+	}
+
+	/* Really ought to do fin processing post data */
 	if (uip_tcp_is_fin(tcp)) {
 		if (sk->write_done)
 			goto out;
@@ -328,13 +339,13 @@ int uip_tx_do_ipv4_tcp(struct uip_tx_arg *arg)
 	/*
 	 * Ignore guest to server frames with zero tcp payload
 	 */
-	if (uip_tcp_payloadlen(tcp) == 0)
+	if (uip_tcp_payloadlen(ip, tcp) == 0)
 		goto out;
 
 	/*
 	 * Sent out TCP data to remote host
 	 */
-	ret = uip_tcp_socket_send(sk, tcp);
+	ret = uip_tcp_socket_send(sk, ip, tcp);
 	if (ret < 0)
 		return -1;
 	/*

@@ -132,6 +132,8 @@ int kvm_setup_guest_init(const char *guestfs_name)
 	int fd, ret;
 	char *data;
 
+	if (!_binary_guest_init_size)
+		die("Guest init not compiled");
 	size = (size_t)&_binary_guest_init_size;
 	data = (char *)&_binary_guest_init_start;
 	snprintf(path, PATH_MAX, "%s%s/virt/init", kvm__get_dir(), guestfs_name);

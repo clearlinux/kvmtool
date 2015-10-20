@@ -1,4 +1,5 @@
 #include "kvm/kvm-cpu.h"
+#include "kvm/cpufeature.h"
 
 #include "kvm/kvm.h"
 #include "kvm/util.h"
@@ -10,8 +11,8 @@
 
 static void filter_cpuid(struct kvm_cpuid2 *kvm_cpuid)
 {
-	unsigned int signature[3];
 	unsigned int i;
+	struct cpuid_regs regs;
 
 	/*
 	 * Filter CPUID functions that are not supported by the hypervisor.
@@ -21,16 +22,24 @@ static void filter_cpuid(struct kvm_cpuid2 *kvm_cpuid)
 
 		switch (entry->function) {
 		case 0:
+
+                        regs    = (struct cpuid_regs) {
+		                .eax            = 0x00,
+
+	                };
+		        host_cpuid(&regs);
 			/* Vendor name */
-			memcpy(signature, "LKVMLKVMLKVM", 12);
-			entry->ebx = signature[0];
-			entry->ecx = signature[1];
-			entry->edx = signature[2];
+			entry->ebx = regs.ebx;
+			entry->ecx = regs.ecx;
+			entry->edx = regs.edx;
 			break;
 		case 1:
 			/* Set X86_FEATURE_HYPERVISOR */
 			if (entry->index == 0)
 				entry->ecx |= (1 << 31);
+                        /* Set CPUID_EXT_TSC_DEADLINE_TIMER*/
+			if (entry->index == 0)
+				entry->ecx |= (1 << 24);
 			break;
 		case 6:
 			/* Clear X86_FEATURE_EPB */

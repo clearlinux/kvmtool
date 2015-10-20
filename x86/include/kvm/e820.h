@@ -2,6 +2,7 @@
 #define KVM_E820_H
 
 #include <kvm/bios.h>
+#include <asm/e820.h>
 
 #define SMAP    0x534d4150      /* ASCII "SMAP" */
 
@@ -10,17 +11,6 @@
 
 #define E820_RAM        1
 #define E820_RESERVED   2
-
-struct e820entry {
-	u64 addr;     /* start of memory segment */
-	u64 size;     /* size of memory segment */
-	u32 type;     /* type of memory segment */
-} __attribute__((packed));
-
-struct e820map {
-	u32 nr_map;
-        struct e820entry map[E820_X_MAX];
-};
 
 struct biosregs;
 

@@ -4,19 +4,54 @@
 
 #define EMPTY_ADDR "0.0.0.0"
 
-static inline bool uip_dhcp_is_discovery(struct uip_dhcp *dhcp)
+static u8 *uip_get_option(struct uip_dhcp *dhcp, u8 match, int *olen)
 {
-	return (dhcp->option[2] == UIP_DHCP_DISCOVER &&
-		dhcp->option[1] == UIP_DHCP_TAG_MSG_TYPE_LEN &&
-		dhcp->option[0] == UIP_DHCP_TAG_MSG_TYPE);
+	u8 *opt_end = ((u8 *)dhcp) + ntohs(dhcp->udp.len);
+	u8 *opt = dhcp->option;
+
+	while (*opt != 0xFF) {
+		if (*opt == 0) {
+			opt++;
+			continue;
+		}
+		if (*opt == match) {
+			*olen = *++opt;
+			return ++opt;
+		}
+		opt += 2 + opt[1];
+		if (opt >= opt_end)
+			return NULL;
+	}
+	return NULL;
 }
 
-static inline bool uip_dhcp_is_request(struct uip_dhcp *dhcp)
+static bool uip_dhcp_is_discovery(struct uip_dhcp *dhcp)
 {
-	return (dhcp->option[2] == UIP_DHCP_REQUEST &&
-		dhcp->option[1] == UIP_DHCP_TAG_MSG_TYPE_LEN &&
-		dhcp->option[0] == UIP_DHCP_TAG_MSG_TYPE);
+	int olen;
+	u8 * opt = uip_get_option(dhcp, UIP_DHCP_TAG_MSG_TYPE, &olen);
+
+	printf("Check discovery\n");
+	if (opt == NULL || olen != UIP_DHCP_TAG_MSG_TYPE_LEN)
+		return false;
+	if (*opt != UIP_DHCP_DISCOVER)
+		return false;
+	printf("Discovery\n");
+	return true;
 }
+
+static bool uip_dhcp_is_request(struct uip_dhcp *dhcp)
+{
+	int olen;
+	u8 * opt = uip_get_option(dhcp, UIP_DHCP_TAG_MSG_TYPE, &olen);
+	printf("Check response\n");
+	if (opt == NULL || olen != UIP_DHCP_TAG_MSG_TYPE_LEN)
+		return false;
+	if (*opt != UIP_DHCP_REQUEST)
+		return false;
+	printf("Response\n");
+	return true;
+}
+
 
 bool uip_udp_is_dhcp(struct uip_udp *udp)
 {
@@ -144,9 +179,10 @@ static int uip_dhcp_fill_option(struct uip_info *info, struct uip_dhcp *dhcp, in
 static int uip_dhcp_make_pkg(struct uip_info *info, struct uip_udp_socket *sk, struct uip_buf *buf, u8 reply_msg_type)
 {
 	struct uip_dhcp *dhcp;
+	struct uip_ip *ip;
 
-	dhcp		= (struct uip_dhcp *)buf->eth;
-
+	ip		= (struct uip_ip *)buf->eth;
+	dhcp		= (struct uip_dhcp *)(ip + 1);
 	dhcp->msg_type	= 2;
 	dhcp->client_ip	= 0;
 	dhcp->your_ip	= htonl(info->guest_ip);
@@ -166,12 +202,14 @@ static int uip_dhcp_make_pkg(struct uip_info *info, struct uip_udp_socket *sk, s
 int uip_tx_do_ipv4_udp_dhcp(struct uip_tx_arg *arg)
 {
 	struct uip_udp_socket sk;
+	struct uip_ip *ip;
 	struct uip_dhcp *dhcp;
 	struct uip_info *info;
 	struct uip_buf *buf;
 	u8 reply_msg_type;
 
-	dhcp = (struct uip_dhcp *)arg->eth;
+	ip = (struct uip_ip *)arg->eth;
+	dhcp = (struct uip_dhcp *)(((uint8_t *)ip) + uip_ip_hdrlen(ip) + 14); /* 14 is ethernet header */
 
 	if (uip_dhcp_is_discovery(dhcp))
 		reply_msg_type = UIP_DHCP_OFFER;

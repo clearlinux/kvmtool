@@ -10,15 +10,151 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/vfs.h>
+#include <sys/xattr.h>
 
 #include <linux/virtio_ring.h>
 #include <linux/virtio_9p.h>
 #include <linux/9p.h>
+
+/*
+ *	Virtual uid/gid glue
+ */
+
+static void set_owner(const char *p, uid_t u, gid_t g)
+{
+    char buf[9];
+    snprintf(buf, 9, "%d", u);
+    if (lsetxattr(p, "user.vuid", buf, strlen(buf), 0))
+        perror("lsetxattr");
+    snprintf(buf, 9, "%d", g);
+    if (lsetxattr(p, "user.vgroup", buf, strlen(buf), 0))
+        perror("lsetxattr");
+}
+
+static void fset_owner(int fd, uid_t u, gid_t g)
+{
+    char buf[9];
+    snprintf(buf, 9, "%d", u);
+    if (fsetxattr(fd, "user.vuid", buf, strlen(buf), 0))
+        perror("fsetxattr");
+    snprintf(buf, 9, "%d", g);
+    if (fsetxattr(fd, "user.vgroup", buf, strlen(buf), 0))
+        perror("fsetxattr");
+}
+
+static void get_owner(const char *p, uid_t *u, gid_t *g)
+{
+    int err;
+    char buf[16];
+
+    err = getxattr(p, "user.vuid", buf, 16);
+    if (err > 0) {
+        buf[err] = 0;
+        sscanf(buf, "%d", u);
+    }
+    err = getxattr(p, "user.vgroup", buf, 16);
+    if (err > 0)
+        sscanf(buf, "%d", g);
+}
+
+static void set_owner_default(const char *p, struct p9_fid *fid, gid_t gid )
+{
+    return set_owner(p, fid->uid, gid);
+}
+
+static void fset_owner_default(int fd, struct p9_fid *fid, gid_t gid )
+{
+    return fset_owner(fd, fid->uid, gid);
+}
+
+static int mkdir_virt(struct p9_fid *fid, gid_t gid, const char *p, mode_t mode)
+{
+    int err = mkdir(p, mode);
+    if (!err)
+        set_owner_default(p, fid, gid);
+    return err;
+}
+
+static int lstat_virt(const char *p, struct stat *st)
+{
+    int err = lstat(p, st);
+    if (!err)
+        get_owner(p, &st->st_uid, &st->st_gid);
+    return err;
+}
+
+static DIR *opendir_virt(const char *p)
+{
+    return opendir(p);
+}
+
+static int opencreat_virt(struct p9_fid *fid, gid_t gid, const char *p, int flags, int mode)
+{
+    if (flags & O_CREAT) {
+        /* Do an O_EXCL open, if it succeeds set the ownership properties */
+        int fd = open(p, flags | O_EXCL, mode);
+        if (fd >= 0) {
+            fset_owner_default(fd, fid, gid);
+            return fd;
+        }
+    }
+    return open(p, flags, mode);
+}
+
+static int open_virt(const char *p, int flags)
+{
+    if (flags & O_CREAT) {
+        fprintf(stderr, "O_CREAT in open_virt\n");
+        flags &= ~O_CREAT;
+    }
+    return open(p, flags);
+}
+
+static int chmod_virt(struct p9_fid *fid, const char *p, mode_t mode)
+{
+    return chmod(p, mode);
+}
+
+static int lchown_virt(struct p9_fid *fid, const char *p, uid_t uid, gid_t gid)
+{
+    set_owner(p, uid, gid);
+    return 0;
+}
+
+static int rename_virt(const char *p1, const char *p2)
+{
+    return rename(p1, p2);
+}
+
+static int mknod_virt(struct p9_fid *fid, gid_t gid, const char *p, mode_t mode, dev_t dev)
+{
+    int err = mknod(p, mode, dev);
+    if (err)
+        return err;
+    set_owner_default(p, fid, gid);
+    return 0;
+}
+
+static int symlink_virt(struct p9_fid *fid, gid_t gid, const char *p1, const char *p2)
+{
+    int err = symlink(p1, p2);
+    if (err)
+        return err;
+    set_owner_default(p2, fid, gid);
+    return 0;
+}
+
+static int link_virt(const char *p1, const char *p2)
+{
+    int err = link(p1, p2);
+    return err;
+}
 
 static LIST_HEAD(devs);
 static int compat_id = -1;
@@ -234,22 +370,22 @@ static void virtio_p9_open(struct p9_dev *p9dev,
 	virtio_p9_pdu_readf(pdu, "dd", &fid, &flags);
 	new_fid = get_fid(p9dev, fid);
 
-	if (lstat(new_fid->abs_path, &st) < 0)
+	if (lstat_virt(new_fid->abs_path, &st) < 0)
 		goto err_out;
 
 	stat2qid(&st, &qid);
 
 	if (is_dir(new_fid)) {
-		new_fid->dir = opendir(new_fid->abs_path);
+		new_fid->dir = opendir_virt(new_fid->abs_path);
 		if (!new_fid->dir)
 			goto err_out;
 	} else {
-		new_fid->fd  = open(new_fid->abs_path,
+		new_fid->fd  = open_virt(new_fid->abs_path,
 				    virtio_p9_openflags(flags));
 		if (new_fid->fd < 0)
 			goto err_out;
 	}
-	/* FIXME!! need ot send proper iounit  */
+	/* FIXME!! need to send proper iounit  */
 	virtio_p9_pdu_writef(pdu, "Qd", &qid, 0);
 
 	*outlen = pdu->write_offset;
@@ -278,15 +414,15 @@ static void virtio_p9_create(struct p9_dev *p9dev,
 	flags = virtio_p9_openflags(flags);
 
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	fd = open(full_path, flags | O_CREAT, mode);
+	fd = opencreat_virt(dfid, gid, full_path, flags | O_CREAT, mode);
 	if (fd < 0)
 		goto err_out;
 	dfid->fd = fd;
 
-	if (lstat(full_path, &st) < 0)
+	if (lstat_virt(full_path, &st) < 0)
 		goto err_out;
 
-	ret = chmod(full_path, mode & 0777);
+	ret = chmod_virt(dfid, full_path, mode & 0777);
 	if (ret < 0)
 		goto err_out;
 
@@ -319,14 +455,14 @@ static void virtio_p9_mkdir(struct p9_dev *p9dev,
 	dfid = get_fid(p9dev, dfid_val);
 
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	ret = mkdir(full_path, mode);
+	ret = mkdir_virt(dfid, gid, full_path, mode);
 	if (ret < 0)
 		goto err_out;
 
-	if (lstat(full_path, &st) < 0)
+	if (lstat_virt(full_path, &st) < 0)
 		goto err_out;
 
-	ret = chmod(full_path, mode & 0777);
+	ret = chmod_virt(dfid, full_path, mode & 0777);
 	if (ret < 0)
 		goto err_out;
 
@@ -376,7 +512,7 @@ static void virtio_p9_walk(struct p9_dev *p9dev,
 
 			free(str);
 
-			if (lstat(rel_to_abs(p9dev, tmp, full_path), &st) < 0)
+			if (lstat_virt(rel_to_abs(p9dev, tmp, full_path), &st) < 0)
 				goto err_out;
 
 			stat2qid(&st, &wqid);
@@ -420,7 +556,7 @@ static void virtio_p9_attach(struct p9_dev *p9dev,
 	free(uname);
 	free(aname);
 
-	if (lstat(p9dev->root_dir, &st) < 0)
+	if (lstat_virt(p9dev->root_dir, &st) < 0)
 		goto err_out;
 
 	stat2qid(&st, &qid);
@@ -552,7 +688,7 @@ static void virtio_p9_readdir(struct p9_dev *p9dev,
 			break;
 		}
 		old_offset = dent->d_off;
-		lstat(rel_to_abs(p9dev, dent->d_name, full_path), &st);
+		lstat_virt(rel_to_abs(p9dev, dent->d_name, full_path), &st);
 		stat2qid(&st, &qid);
 		read = pdu->write_offset;
 		virtio_p9_pdu_writef(pdu, "Qqbs", &qid, dent->d_off,
@@ -583,7 +719,7 @@ static void virtio_p9_getattr(struct p9_dev *p9dev,
 
 	virtio_p9_pdu_readf(pdu, "dq", &fid_val, &request_mask);
 	fid = get_fid(p9dev, fid_val);
-	if (lstat(fid->abs_path, &st) < 0)
+	if (lstat_virt(fid->abs_path, &st) < 0)
 		goto err_out;
 
 	virtio_p9_fill_stat(p9dev, &st, &statl);
@@ -676,7 +812,7 @@ static void virtio_p9_setattr(struct p9_dev *p9dev,
 		if (!(p9attr.valid & ATTR_GID))
 			p9attr.gid = KGIDT_INIT(-1);
 
-		ret = lchown(fid->abs_path, __kuid_val(p9attr.uid),
+		ret = lchown_virt(fid, fid->abs_path, __kuid_val(p9attr.uid),
 				__kgid_val(p9attr.gid));
 		if (ret < 0)
 			goto err_out;
@@ -776,7 +912,7 @@ static void virtio_p9_rename(struct p9_dev *p9dev,
 	new_fid = get_fid(p9dev, new_fid_val);
 
 	sprintf(full_path, "%s/%s", new_fid->abs_path, new_name);
-	ret = rename(fid->abs_path, full_path);
+	ret = rename_virt(fid->abs_path, full_path);
 	if (ret < 0)
 		goto err_out;
 	*outlen = pdu->write_offset;
@@ -860,14 +996,14 @@ static void virtio_p9_mknod(struct p9_dev *p9dev,
 
 	dfid = get_fid(p9dev, fid_val);
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	ret = mknod(full_path, mode, makedev(major, minor));
+	ret = mknod_virt(dfid, gid, full_path, mode, makedev(major, minor));
 	if (ret < 0)
 		goto err_out;
 
-	if (lstat(full_path, &st) < 0)
+	if (lstat_virt(full_path, &st) < 0)
 		goto err_out;
 
-	ret = chmod(full_path, mode & 0777);
+	ret = chmod_virt(dfid, full_path, mode & 0777);
 	if (ret < 0)
 		goto err_out;
 
@@ -927,11 +1063,11 @@ static void virtio_p9_symlink(struct p9_dev *p9dev,
 
 	dfid = get_fid(p9dev, fid_val);
 	sprintf(new_name, "%s/%s", dfid->abs_path, name);
-	ret = symlink(old_path, new_name);
+	ret = symlink_virt(dfid, gid, old_path, new_name);
 	if (ret < 0)
 		goto err_out;
 
-	if (lstat(new_name, &st) < 0)
+	if (lstat_virt(new_name, &st) < 0)
 		goto err_out;
 
 	stat2qid(&st, &qid);
@@ -962,7 +1098,7 @@ static void virtio_p9_link(struct p9_dev *p9dev,
 	dfid = get_fid(p9dev, dfid_val);
 	fid =  get_fid(p9dev, fid_val);
 	sprintf(full_path, "%s/%s", dfid->abs_path, name);
-	ret = link(fid->abs_path, full_path);
+	ret = link_virt(fid->abs_path, full_path);
 	if (ret < 0)
 		goto err_out;
 	free(name);
@@ -1079,7 +1215,7 @@ static void virtio_p9_renameat(struct p9_dev *p9dev,
 
 	sprintf(old_full_path, "%s/%s", old_dfid->abs_path, old_name);
 	sprintf(new_full_path, "%s/%s", new_dfid->abs_path, new_name);
-	ret = rename(old_full_path, new_full_path);
+	ret = rename_virt(old_full_path, new_full_path);
 	if (ret < 0)
 		goto err_out;
 	/*
@@ -1366,7 +1502,7 @@ int virtio_9p_img_name_parser(const struct option *opt, const char *arg, int uns
 		char tmp[PATH_MAX];
 
 		if (kvm->cfg.using_rootfs)
-			die("Please use only one rootfs directory atmost");
+			die("Please use only one rootfs directory at most");
 
 		if (realpath(arg, tmp) == 0 ||
 		    virtio_9p__register(kvm, tmp, "/dev/root") < 0)
@@ -1382,7 +1518,7 @@ int virtio_9p_img_name_parser(const struct option *opt, const char *arg, int uns
 		char tmp[PATH_MAX];
 
 		if (kvm->cfg.using_rootfs)
-			die("Please use only one rootfs directory atmost");
+			die("Please use only one rootfs directory at most");
 
 		if (realpath(path, tmp) == 0 ||
 		    virtio_9p__register(kvm, tmp, "/dev/root") < 0)

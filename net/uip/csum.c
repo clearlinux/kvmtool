@@ -24,22 +24,16 @@ u16 uip_csum_ip(struct uip_ip *ip)
 	return uip_csum(0, &ip->vhl, uip_ip_hdrlen(ip));
 }
 
-u16 uip_csum_icmp(struct uip_icmp *icmp)
+u16 uip_csum_icmp(struct uip_ip *ip, struct uip_icmp *icmp)
 {
-	struct uip_ip *ip;
-
-	ip = &icmp->ip;
 	return icmp->csum = uip_csum(0, &icmp->type, htons(ip->len) - uip_ip_hdrlen(ip) - 8); /* icmp header len = 8 */
 }
 
-u16 uip_csum_udp(struct uip_udp *udp)
+u16 uip_csum_udp(struct uip_ip *ip, struct uip_udp *udp)
 {
 	struct uip_pseudo_hdr hdr;
-	struct uip_ip *ip;
 	int udp_len;
 	u8 *pad;
-
-	ip	  = &udp->ip;
 
 	hdr.sip   = ip->sip;
 	hdr.dip	  = ip->dip;
@@ -61,14 +55,12 @@ u16 uip_csum_udp(struct uip_udp *udp)
 
 }
 
-u16 uip_csum_tcp(struct uip_tcp *tcp)
+u16 uip_csum_tcp(struct uip_ip *ip, struct uip_tcp *tcp)
 {
 	struct uip_pseudo_hdr hdr;
-	struct uip_ip *ip;
 	u16 tcp_len;
 	u8 *pad;
 
-	ip	  = &tcp->ip;
 	tcp_len   = ntohs(ip->len) - uip_ip_hdrlen(ip);
 
 	hdr.sip   = ip->sip;

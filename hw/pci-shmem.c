@@ -14,6 +14,10 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #define MB_SHIFT (20)
 #define KB_SHIFT (10)
 #define GB_SHIFT (30)
@@ -42,6 +46,10 @@ enum ivshmem_registers {
 	INTRSTATUS = 4,
 	IVPOSITION = 8,
 	DOORBELL = 12,
+	MEGARAM = 16,
+	MEGARAMH = 20,
+	MEGASIZE = 24,
+	MEGASIZEH = 28,
 };
 
 static struct shmem_info *shmem_region;
@@ -77,6 +85,18 @@ static bool shmem_pci__io_in(struct ioport *ioport, struct kvm_cpu *vcpu, u16 po
 		break;
 	case DOORBELL:
 		break;
+	case MEGARAM:
+		ioport__write32(data, shmem_region->phys_addr);
+		break;
+	case MEGARAMH:
+		ioport__write32(data, shmem_region->phys_addr >> 32);
+		break;
+	case MEGASIZE:
+		ioport__write32(data, shmem_region->size);
+		break;
+	case MEGASIZEH:
+		ioport__write32(data, shmem_region->size >> 32);
+		break;
 	};
 
 	return true;
@@ -94,6 +114,14 @@ static bool shmem_pci__io_out(struct ioport *ioport, struct kvm_cpu *vcpu, u16 p
 	case IVPOSITION:
 		break;
 	case DOORBELL:
+		break;
+	case MEGARAM:
+		break;
+	case MEGARAMH:
+		break;
+	case MEGASIZE:
+		break;
+	case MEGASIZEH:
 		break;
 	};
 
@@ -194,17 +222,21 @@ int pci_shmem__remove_client(struct kvm *kvm, u32 id)
 	return ioctl(kvm->vm_fd, KVM_IOEVENTFD, &ioevent);
 }
 
-static void *setup_shmem(const char *key, size_t len, int creating)
+static void *setup_shmem(const char *key, size_t len, int creating, int file, int private)
 {
 	int fd;
 	int rtn;
 	void *mem;
 	int flag = O_RDWR;
+	int mflag = MAP_SHARED;
 
 	if (creating)
 		flag |= O_CREAT;
 
-	fd = shm_open(key, flag, S_IRUSR | S_IWUSR);
+        if (file)
+		fd = open(key, flag, S_IRUSR | S_IWUSR);
+        else
+		fd = shm_open(key, flag, S_IRUSR | S_IWUSR);
 	if (fd < 0) {
 		pr_warning("Failed to open shared memory file %s\n", key);
 		return NULL;
@@ -215,8 +247,12 @@ static void *setup_shmem(const char *key, size_t len, int creating)
 		if (rtn < 0)
 			pr_warning("Can't ftruncate(fd,%zu)\n", len);
 	}
+
+	if (private)
+		mflag = MAP_PRIVATE;
+
 	mem = mmap(NULL, len,
-		   PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NORESERVE, fd, 0);
+		   PROT_READ | PROT_WRITE, mflag | MAP_NORESERVE, fd, 0);
 	if (mem == MAP_FAILED) {
 		pr_warning("Failed to mmap shared memory file");
 		mem = NULL;
@@ -240,6 +276,8 @@ int shmem_parser(const struct option *opt, const char *arg, int unset)
 	char *next;
 	int base = 10;
 	int verbose = 0;
+	int private = 0;	/* Default is not copy on write */
+	int file = 0;
 
 	const int skip_pci = strlen("pci:");
 	if (verbose)
@@ -324,6 +362,45 @@ int shmem_parser(const struct option *opt, const char *arg, int unset)
 		else
 			p = next + 1;
 	}
+	const int skip_file = strlen("file=");
+	next = strcasestr(p, "file=");
+	if (*p && next) {
+		if (p != next)
+			die("unexpected chars before filename\n");
+                if (handle)
+			die("cannot specify handle and filename\n");
+		p += skip_file;
+		next = strchrnul(p, ':');
+		if (next - p) {
+			handle = malloc(next - p + 1);
+			strncpy(handle, p, next - p);
+			handle[next - p] = '\0';	/* just in case. */
+		}
+		if (*next == '\0')
+			p = next;
+		else
+			p = next + 1;
+		file = 1;
+	}
+	if (file == 1) {
+		struct stat buf;
+		if (stat(handle, &buf)==0) {
+			size = (unsigned long long) buf.st_size;
+			if (verbose)
+				pr_info("shmem: using actual file size %lld, 0x%llx\n", (unsigned long long) size, (unsigned long long) size);
+		} else {
+			die("cannot stat file specified in file=\n");
+		}
+	}
+	next = strcasestr(p, "private");
+	if (*p && next) {
+		private = 1;
+		next = strchrnul(next, ':');
+		if (*next == '\0')
+			p = next;
+		else
+			p = next + 1;
+	}
 	/* parse optional create flag to see if we should create shm seg. */
 	if (*p && strcasestr(p, "create")) {
 		create = 1;
@@ -339,13 +416,19 @@ int shmem_parser(const struct option *opt, const char *arg, int unset)
 		pr_info("shmem: phys_addr = %llx",
 			(unsigned long long)phys_addr);
 		pr_info("shmem: size      = %llx", (unsigned long long)size);
-		pr_info("shmem: handle    = %s", handle);
+		if (!file)
+			pr_info("shmem: handle    = %s", handle);
+		else
+			pr_info("shmem: file      = %s", handle);
+		pr_info("shmem: private   = %d", private);
 		pr_info("shmem: create    = %d", create);
 	}
 
 	si->phys_addr = phys_addr;
 	si->size = size;
 	si->handle = handle;
+	si->file = file;
+        si->private = private;
 	si->create = create;
 	pci_shmem__register_mem(si);	/* ownership of si, etc. passed on. */
 	return 0;
@@ -369,24 +452,24 @@ int pci_shmem__init(struct kvm *kvm)
 	kvm__register_mmio(kvm, msix_block, 0x1010, false, callback_mmio_msix, NULL);
 
 	/*
-	 * This registers 3 BARs:
+	 * This registers 2 BARs:
 	 *
 	 * 0 - ivshmem registers
 	 * 1 - MSI-X MMIO space
-	 * 2 - Shared memory block
+	 *
+	 * The memory isn't really in PCI space so keep it out of the BARs
+	 * and avoid giving the kernel hiccups.
 	 */
 	pci_shmem_pci_device.bar[0] = cpu_to_le32(ivshmem_registers | PCI_BASE_ADDRESS_SPACE_IO);
-	pci_shmem_pci_device.bar_size[0] = shmem_region->size;
+	pci_shmem_pci_device.bar_size[0] = 0x100; //shmem_region->size;
 	pci_shmem_pci_device.bar[1] = cpu_to_le32(msix_block | PCI_BASE_ADDRESS_SPACE_MEMORY);
 	pci_shmem_pci_device.bar_size[1] = 0x1010;
-	pci_shmem_pci_device.bar[2] = cpu_to_le32(shmem_region->phys_addr | PCI_BASE_ADDRESS_SPACE_MEMORY);
-	pci_shmem_pci_device.bar_size[2] = shmem_region->size;
 
 	device__register(&pci_shmem_device);
 
 	/* Open shared memory and plug it into the guest */
 	mem = setup_shmem(shmem_region->handle, shmem_region->size,
-				shmem_region->create);
+				shmem_region->create, shmem_region->file, shmem_region->private);
 	if (mem == NULL)
 		return -EINVAL;
 

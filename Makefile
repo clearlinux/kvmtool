@@ -279,8 +279,9 @@ endif
 
 ifeq ($(call try-build,$(SOURCE_STATIC),,-static),y)
 	CFLAGS		+= -DCONFIG_GUEST_INIT
-	GUEST_INIT	:= guest/init
-	GUEST_OBJS	= guest/guest_init.o
+	CFLAGS      += -DCONFIG_HAS_LIBC
+	GUEST_INIT := guest/init
+	GUEST_OBJS = guest/guest_init.o
 else
 	$(warning No static libc found. Skipping guest init)
 	NOTFOUND        += static-libc
@@ -307,6 +308,8 @@ LIBS	+= -lrt
 LIBS	+= -lpthread
 LIBS	+= -lutil
 
+# FIXME: for asm/e820.h building on Ubuntu vivid.
+CFLAGS  += -I/usr/include/x86_64-linux-gnu
 
 comma = ,
 
@@ -340,7 +343,7 @@ WARNINGS += -Wvolatile-register-var
 WARNINGS += -Wwrite-strings
 WARNINGS += -Wno-format-nonliteral
 
-CFLAGS	+= $(WARNINGS)
+CFLAGS	+= $(WARNINGS) -DCONFIG_HAS_AIO
 
 ifneq ($(WERROR),0)
 	CFLAGS += -Werror

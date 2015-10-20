@@ -5,7 +5,10 @@
 #include "kvm/kvm.h"
 
 #include <asm/msr-index.h>
+#include <asm/processor-flags.h>
+#include <asm/ldt.h>
 #include <asm/apicdef.h>
+#include <asm/segment.h>
 #include <linux/err.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -185,13 +188,126 @@ static void kvm_cpu__setup_regs(struct kvm_cpu *vcpu)
 		.rip	= vcpu->kvm->arch.boot_ip,
 		.rsp	= vcpu->kvm->arch.boot_sp,
 		.rbp	= vcpu->kvm->arch.boot_sp,
+		.rsi    = vcpu->kvm->arch.boot_si,
 	};
 
-	if (vcpu->regs.rip > USHRT_MAX)
+	if (!vcpu->kvm->arch.boot_protected && vcpu->regs.rip > USHRT_MAX)
 		die("ip 0x%llx is too high for real mode", (u64)vcpu->regs.rip);
 
 	if (ioctl(vcpu->vcpu_fd, KVM_SET_REGS, &vcpu->regs) < 0)
 		die_perror("KVM_SET_REGS failed");
+}
+
+static void prot32_sregs(struct kvm_cpu *vcpu)
+{
+}
+
+#define BOOT_GDT	0x500
+#define BOOT_IDT	0x520
+
+#define BOOT_GDT_NULL	0
+#define BOOT_GDT_CODE	1
+#define BOOT_GDT_DATA	2
+#define BOOT_GDT_TSS	3
+#define BOOT_GDT_MAX	4
+
+/* Puts PML4 right after zero page but aligned to 4k */
+#define BOOT_PML4	0x9000
+#define BOOT_PDPTE	0xA000
+
+/*
+ * We need to build a kvm_segment struct to represent each
+ * of the GDT entries we've created. These macros help keep
+ * the entries consistent by automatically building the
+ * struct based on the gdt fields
+ */
+#define GDT_GET_BASE(x) \
+        (( (x) & 0xFF00000000000000) >> 32) | \
+        (( (x) & 0x000000FF00000000) >> 16) | \
+        (( (x) & 0x00000000FFFF0000) >> 16)
+
+#define GDT_GET_LIMIT(x) (__u32)( \
+        (( (x) & 0x000F000000000000) >> 32) | \
+        (( (x) & 0x000000000000FFFF)))
+
+#define GDT_GET_G(x)   (__u8)(( (x) & 0x0080000000000000) >> 55)
+#define GDT_GET_DB(x)  (__u8)(( (x) & 0x0040000000000000) >> 54)
+#define GDT_GET_L(x)   (__u8)(( (x) & 0x0020000000000000) >> 53)
+#define GDT_GET_AVL(x) (__u8)(( (x) & 0x0010000000000000) >> 52)
+#define GDT_GET_P(x)   (__u8)(( (x) & 0x0000800000000000) >> 47)
+#define GDT_GET_DPL(x) (__u8)(( (x) & 0x0000600000000000) >> 45)
+#define GDT_GET_S(x)   (__u8)(( (x) & 0x0000100000000000) >> 44)
+#define GDT_GET_TYPE(x)(__u8)(( (x) & 0x00000F0000000000) >> 40)
+
+#define GDT_TO_KVM_SEGMENT(seg, gdt_table, sel) \
+do { \
+	__u64 gdt_ent = gdt_table[sel]; \
+	seg.base = GDT_GET_BASE(gdt_ent); \
+	seg.limit = GDT_GET_LIMIT(gdt_ent); \
+	seg.selector = sel * 8; \
+	seg.type = GDT_GET_TYPE(gdt_ent); \
+	seg.present = GDT_GET_P(gdt_ent); \
+	seg.dpl = GDT_GET_DPL(gdt_ent); \
+	seg.db = GDT_GET_DB(gdt_ent); \
+	seg.s = GDT_GET_S(gdt_ent); \
+	seg.l = GDT_GET_L(gdt_ent); \
+	seg.g = GDT_GET_G(gdt_ent); \
+	seg.avl = GDT_GET_AVL(gdt_ent); \
+} while (0);
+
+static void prot64_sregs(struct kvm_cpu *vcpu)
+{
+	void *p;
+
+	__u64 idt = 0;
+	__u64 gdt[BOOT_GDT_MAX] = {	/* flags, base, limit */
+		[BOOT_GDT_NULL] = GDT_ENTRY(0, 0, 0),
+		[BOOT_GDT_CODE] = GDT_ENTRY(0xA09B, 0, 0xFFFFF),
+		[BOOT_GDT_DATA] = GDT_ENTRY(0xC093, 0, 0xFFFFF),
+		[BOOT_GDT_TSS ] = GDT_ENTRY(0x808B, 0, 0xFFFFF),
+	};
+
+	struct kvm_segment data_seg, code_seg, tss_seg;
+
+	GDT_TO_KVM_SEGMENT(code_seg, gdt, BOOT_GDT_CODE);
+	GDT_TO_KVM_SEGMENT(data_seg, gdt, BOOT_GDT_DATA);
+	GDT_TO_KVM_SEGMENT(tss_seg,  gdt, BOOT_GDT_TSS);
+
+/* Segments */
+	p = guest_flat_to_host(vcpu->kvm, BOOT_GDT);
+	memcpy(p, gdt, sizeof(gdt));
+	vcpu->sregs.gdt.base = BOOT_GDT;
+	vcpu->sregs.gdt.limit = sizeof(gdt)-1;
+
+	p = guest_flat_to_host(vcpu->kvm, BOOT_IDT);
+	memcpy(p, &idt, sizeof(idt));
+	vcpu->sregs.idt.base = BOOT_IDT;
+	vcpu->sregs.idt.limit = sizeof(idt)-1;
+
+	vcpu->sregs.cs = code_seg;
+	vcpu->sregs.ds = data_seg;
+	vcpu->sregs.es = data_seg;
+	vcpu->sregs.fs = data_seg;
+	vcpu->sregs.gs = data_seg;
+	vcpu->sregs.ss = data_seg;
+	vcpu->sregs.tr = tss_seg;
+
+/* Page Tables */
+	p = guest_flat_to_host(vcpu->kvm, BOOT_PML4);
+	memset(p, 0, 4096);
+	*(__u64 *)p = (__u64)(BOOT_PDPTE | 3);
+
+	p = guest_flat_to_host(vcpu->kvm, BOOT_PDPTE);
+	memset(p, 0, 4096);
+	*(__u64 *)p = 0x83;
+
+	vcpu->sregs.cr3 = BOOT_PML4;
+	vcpu->sregs.cr4 |= X86_CR4_PAE;
+	vcpu->sregs.cr0 |= X86_CR0_PG;
+
+/* 64-bit protected mode */
+	vcpu->sregs.cr0 |= X86_CR0_PE;
+	vcpu->sregs.efer |= EFER_LME;
 }
 
 static void kvm_cpu__setup_sregs(struct kvm_cpu *vcpu)
@@ -211,6 +327,13 @@ static void kvm_cpu__setup_sregs(struct kvm_cpu *vcpu)
 	vcpu->sregs.fs.base	= selector_to_base(vcpu->kvm->arch.boot_selector);
 	vcpu->sregs.gs.selector	= vcpu->kvm->arch.boot_selector;
 	vcpu->sregs.gs.base	= selector_to_base(vcpu->kvm->arch.boot_selector);
+
+	if (vcpu->kvm->arch.boot_protected && vcpu->cpu_id == 0) {
+		if (vcpu->kvm->arch.boot_64)
+			prot64_sregs(vcpu);
+		else
+			prot32_sregs(vcpu);
+	}
 
 	if (ioctl(vcpu->vcpu_fd, KVM_SET_SREGS, &vcpu->sregs) < 0)
 		die_perror("KVM_SET_SREGS failed");
