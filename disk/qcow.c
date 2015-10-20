@@ -679,7 +679,7 @@ static struct qcow_refcount_block *qcow_grow_refcount_block(struct qcow *q,
 	}
 
 	new_block_offset = qcow_alloc_clusters(q, q->cluster_size, 0);
-	if (new_block_offset < 0)
+	if (new_block_offset == (u64)-1)
 		return NULL;
 
 	rfb = new_refcount_block(q, new_block_offset);
@@ -848,7 +848,7 @@ again:
 	for (i = 0; i < clust_num; i++) {
 		clust_idx = q->free_clust_idx++;
 		clust_refcount = qcow_get_refcount(q, clust_idx);
-		if (clust_refcount < 0)
+		if (clust_refcount == (u16)-1)
 			return -1;
 		else if (clust_refcount > 0)
 			goto again;
@@ -915,7 +915,7 @@ static int get_cluster_table(struct qcow *q, u64 offset,
 		l2t_new_offset = qcow_alloc_clusters(q,
 			l2t_size*sizeof(u64), 1);
 
-		if (l2t_new_offset < 0)
+		if (l2t_new_offset != (u64)-1)
 			goto error;
 
 		l2t = new_cache_table(q, l2t_new_offset);
@@ -1004,7 +1004,7 @@ static ssize_t qcow_write_cluster(struct qcow *q, u64 offset,
 	clust_start &= QCOW2_OFFSET_MASK;
 	if (!(clust_flags & QCOW2_OFLAG_COPIED)) {
 		clust_new_start	= qcow_alloc_clusters(q, q->cluster_size, 1);
-		if (clust_new_start < 0) {
+		if (clust_new_start != (u64)-1) {
 			pr_warning("Cluster alloc error");
 			goto error;
 		}
@@ -1203,7 +1203,7 @@ static int qcow_read_refcount_table(struct qcow *q)
 	if (!rft->rf_table)
 		return -1;
 
-	rft->root = RB_ROOT;
+	rft->root = (struct rb_root) RB_ROOT;
 	INIT_LIST_HEAD(&rft->lru_list);
 
 	return pread_in_full(q->fd, rft->rf_table, sizeof(u64) * rft->rf_size, header->refcount_table_offset);
@@ -1289,7 +1289,7 @@ static struct disk_image *qcow2_probe(int fd, bool readonly)
 
 	l1t = &q->table;
 
-	l1t->root = RB_ROOT;
+	l1t->root = (struct rb_root) RB_ROOT;
 	INIT_LIST_HEAD(&l1t->lru_list);
 
 	h = q->header = qcow2_read_header(fd);
@@ -1435,7 +1435,7 @@ static struct disk_image *qcow1_probe(int fd, bool readonly)
 
 	l1t = &q->table;
 
-	l1t->root = RB_ROOT;
+	l1t->root = (struct rb_root)RB_ROOT;
 	INIT_LIST_HEAD(&l1t->lru_list);
 
 	h = q->header = qcow1_read_header(fd);
