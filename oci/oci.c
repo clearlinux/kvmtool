@@ -1232,6 +1232,14 @@ int kvm_oci_setup(struct kvm *kvm)
 {
 	int ret;
 
+	/* Required for:
+	 *
+	 * - creating directories below KVM_OCI_RUNTIME_DIR_PREFIX.
+	 * - calling mount(2).
+	 */
+	if (getuid())
+		return pr_err("Must run as root in OCI mode");
+
 	if (!kvm->cfg.guest_name)
 		return pr_err("OCI mandates a name");
 
