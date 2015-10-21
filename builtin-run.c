@@ -60,14 +60,6 @@ static int  kvm_run_wrapper;
 
 bool do_debug_print = false;
 
-#ifdef CONFIG_HAS_LIBC
-extern char _binary_guest_init_start;
-extern char _binary_guest_init_size;
-#else
-static char _binary_guest_init_start=0;
-static char _binary_guest_init_size=0;
-#endif
-
 static const char * const run_usage[] = {
 	"lkvm run [<options>] [<kernel image>]",
 	NULL

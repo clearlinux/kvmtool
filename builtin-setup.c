@@ -122,8 +122,8 @@ static const char *guestfs_symlinks[] = {
 };
 
 #ifdef CONFIG_GUEST_INIT
-extern char _binary_guest_init_start;
-extern char _binary_guest_init_size;
+static char _binary_guest_init_start=0;
+static char _binary_guest_init_size=0;
 
 int kvm_setup_guest_init(const char *guestfs_name)
 {
