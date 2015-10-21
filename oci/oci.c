@@ -1120,6 +1120,7 @@ static int oci_read_config_file(struct kvm *kvm, enum oci_file_type file_type)
 static int oci_read_config_files(struct kvm *kvm)
 {
 	int count = 0;
+	int expected = 2;
 
 	if (kvm->cfg.oci_config_path) {
 		int ret;
@@ -1144,8 +1145,13 @@ static int oci_read_config_files(struct kvm *kvm)
 		}
 	}
 
-	if (count && count != 2) {
-		return pr_err("Expected 2 OCI config files, got %d", count);
+	if (count) {
+		if (count != expected) {
+			return pr_err("Expected %d OCI config files, got %d",
+					expected, count);
+		}
+
+		kvm->cfg.oci_mode = true;
 	}
 
 	return 0;
@@ -1232,6 +1238,10 @@ int kvm_oci_setup(struct kvm *kvm)
 {
 	int ret;
 
+	ret = oci_read_config_files(kvm);
+	if (ret < 0 || !kvm->cfg.oci_mode)
+		return ret;
+
 	/* Required for:
 	 *
 	 * - creating directories below KVM_OCI_RUNTIME_DIR_PREFIX.
@@ -1242,11 +1252,6 @@ int kvm_oci_setup(struct kvm *kvm)
 
 	if (!kvm->cfg.guest_name)
 		return pr_err("OCI mandates a name");
-
-	ret = oci_read_config_files(kvm);
-	if (ret < 0)
-		return ret;
-	kvm->cfg.oci_mode = true;
 
 	if (! kvm->cfg.console)
 		kvm->cfg.console = "virtio";
