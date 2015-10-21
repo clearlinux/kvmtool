@@ -284,8 +284,8 @@ ifeq ($(call try-build,$(SOURCE_STATIC),,-static),y)
 	GUEST_INIT := guest/init
 	GUEST_OBJS = guest/guest_init.o
 else
-	$(warning No static libc found. Skipping guest init)
-	NOTFOUND        += static-libc
+        $(warning No static libc found. Skipping guest init)
+        NOTFOUND        += static-libc
 endif
 
 ifeq (y,$(ARCH_WANT_LIBFDT))
