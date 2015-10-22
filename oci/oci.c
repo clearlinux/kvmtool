@@ -5,22 +5,6 @@
  * See: https://www.opencontainers.org/
  */
 
-/* FIXME:TODO:
- *
- * - chdir to config.json:process.cwd
- * - su to config.json:process.user.uid
- * - sg to config.json:process.user.gid
- * - set config.json:process.env in workload script.
- *
- * - mount config inside container?
- *
- * - XXX: split json parsing into json.c to allow simpler rework for qemu!
- *
- * - json: 
- *   - vm.kernel.parameters: ip=%s::%s::%s::off
- * - network setup ("--network 'mode=tap,script=none,tapif=%s,guest_mac=%s'")
- */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
