@@ -274,13 +274,13 @@ endif
 ifeq ($(LTO),1)
 	FLAGS_LTO := -flto
 	ifeq ($(call try-build,$(SOURCE_HELLO),$(CFLAGS),$(FLAGS_LTO)),y)
-		CFLAGS		+= $(FLAGS_LTO)
+		CFLAGS += $(FLAGS_LTO)
 	endif
 endif
 
 ifeq ($(call try-build,$(SOURCE_STATIC),,-static),y)
-	CFLAGS		+= -DCONFIG_GUEST_INIT
-	CFLAGS      += -DCONFIG_HAS_LIBC
+	CFLAGS	   += -DCONFIG_GUEST_INIT
+	CFLAGS     += -DCONFIG_HAS_LIBC
 	GUEST_INIT := guest/init
 	GUEST_OBJS = guest/guest_init.o
 else
@@ -303,17 +303,20 @@ ifneq ($(NOTFOUND),)
         $(warning Skipping optional libraries: $(NOTFOUND))
 endif
 
+ifeq ($(shell pkg-config json-c 2>/dev/null; echo $$?),0)
+	CFLAGS_JSON_C  := $(shell pkg-config --cflags json-c 2>/dev/null)
+	LDFLAGS_JSON_C := $(shell pkg-config --libs json-c 2>/dev/null)
+	CFLAGS         += $(CFLAGS_JSON_C)
+	LIBS           += $(LDFLAGS_JSON_C)
+else
+        $(error No json-c found. Please install libjson-c-dev package)
+endif
+
 ###
 
 LIBS	+= -lrt
 LIBS	+= -lpthread
 LIBS	+= -lutil
-
-CFLAGS_JSON_C := $(shell pkg-config --cflags json-c 2>/dev/null)
-LDFLAGS_JSON_C := $(shell pkg-config --libs json-c 2>/dev/null)
-
-CFLAGS  += $(CFLAGS_JSON_C)
-LIBS	+= $(LDFLAGS_JSON_C)
 
 # FIXME: for asm/e820.h building on Ubuntu vivid.
 CFLAGS  += -I/usr/include/$(shell arch)-linux-gnu

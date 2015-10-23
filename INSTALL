@@ -15,16 +15,16 @@ honoured.
 Prerequisites
 --------------
 For compilation you will need a recent GNU tool chain (binutils, gcc, make),
-also the standard C library.
+json-c, and also the standard C library.
 
 For deb based systems:
 	$ sudo apt-get install build-essential
 	On x86-64 systems you have to add the 32-bit compat headers:
-	$ sudo apt-get install libc6-dev-i386
+	$ sudo apt-get install libc6-dev-i386 libjson-c-dev
 For Fedora based systems:
-	# yum install glibc-static
+	# yum install glibc-static json-c-devel
 For OpenSUSE based systems:
-	# zypper install glibc-devel-static
+	# zypper install glibc-devel-static json-c-devel
 
 Architectures which require device tree (PowerPC, ARM, ARM64) also require
 libfdt.
