@@ -15,9 +15,7 @@ include config/utilities.mak
 include config/feature-tests.mak
 
 CC	:= $(CROSS_COMPILE)gcc
-CFLAGS	:=
 LD	:= $(CROSS_COMPILE)ld
-LDFLAGS	:=
 
 FIND	:= find
 CSCOPE	:= cscope
@@ -110,6 +108,7 @@ endif
 ifeq ($(ARCH),x86_64)
 	ARCH         := x86
 	DEFINES      += -DCONFIG_X86_64
+	ARCH_PRE_INIT = x86/init.S
 endif
 
 ### Arch-specific stuff
@@ -161,7 +160,7 @@ ifeq ($(ARCH), arm)
 	OBJS		+= arm/aarch32/kvm-cpu.o
 	ARCH_INCLUDE	:= $(HDRS_ARM_COMMON)
 	ARCH_INCLUDE	+= -Iarm/aarch32/include
-	CFLAGS		+= -march=armv7-a
+	override CFLAGS	+= -march=armv7-a
 
 	ARCH_WANT_LIBFDT := y
 endif
@@ -197,12 +196,12 @@ endif
 # On a given system, some libs may link statically, some may not; so, check
 # both and only build those that link!
 
-ifeq ($(call try-build,$(SOURCE_STRLCPY),$(CFLAGS),),y)
+ifeq ($(call try-build,$(SOURCE_STRLCPY),$(CFLAGS),$(LDFLAGS)),y)
 	CFLAGS_DYNOPT	+= -DHAVE_STRLCPY
 	CFLAGS_STATOPT	+= -DHAVE_STRLCPY
 endif
 
-ifeq ($(call try-build,$(SOURCE_BFD),$(CFLAGS),-lbfd -static),y)
+ifeq ($(call try-build,$(SOURCE_BFD),$(CFLAGS),$(LDFLAGS) -lbfd -static),y)
 	CFLAGS_STATOPT	+= -DCONFIG_HAS_BFD
 	OBJS_STATOPT	+= symbol.o
 	LIBS_STATOPT	+= -lbfd
@@ -213,7 +212,7 @@ endif
 ifeq (y,$(ARCH_HAS_FRAMEBUFFER))
 	CFLAGS_GTK3 := $(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
 	LDFLAGS_GTK3 := $(shell pkg-config --libs gtk+-3.0 2>/dev/null)
-	ifeq ($(call try-build,$(SOURCE_GTK3),$(CFLAGS) $(CFLAGS_GTK3),$(LDFLAGS_GTK3)),y)
+	ifeq ($(call try-build,$(SOURCE_GTK3),$(CFLAGS) $(CFLAGS_GTK3),$(LDFLAGS) $(LDFLAGS_GTK3)),y)
 		OBJS_DYNOPT	+= ui/gtk3.o
 		CFLAGS_DYNOPT	+= -DCONFIG_HAS_GTK3 $(CFLAGS_GTK3)
 		LIBS_DYNOPT	+= $(LDFLAGS_GTK3)
@@ -221,67 +220,74 @@ ifeq (y,$(ARCH_HAS_FRAMEBUFFER))
 		NOTFOUND	+= GTK3
 	endif
 
-	ifeq ($(call try-build,$(SOURCE_VNCSERVER),$(CFLAGS),-lvncserver),y)
+	ifeq ($(call try-build,$(SOURCE_VNCSERVER),$(CFLAGS),$(LDFLAGS) -lvncserver),y)
 		OBJS_DYNOPT	+= ui/vnc.o
 		CFLAGS_DYNOPT	+= -DCONFIG_HAS_VNCSERVER
 		LIBS_DYNOPT	+= -lvncserver
 	else
 		NOTFOUND	+= vncserver
 	endif
-	ifeq ($(call try-build,$(SOURCE_VNCSERVER),$(CFLAGS),-lvncserver -static),y)
+	ifeq ($(call try-build,$(SOURCE_VNCSERVER),$(CFLAGS),$(LDFLAGS) -lvncserver -static),y)
 		OBJS_STATOPT	+= ui/vnc.o
 		CFLAGS_STATOPT	+= -DCONFIG_HAS_VNCSERVER
 		LIBS_STATOPT	+= -lvncserver
 	endif
 
-	ifeq ($(call try-build,$(SOURCE_SDL),$(CFLAGS),-lSDL),y)
+	ifeq ($(call try-build,$(SOURCE_SDL),$(CFLAGS),$(LDFLAGS) -lSDL),y)
 		OBJS_DYNOPT	+= ui/sdl.o
 		CFLAGS_DYNOPT	+= -DCONFIG_HAS_SDL
 		LIBS_DYNOPT	+= -lSDL
 	else
 		NOTFOUND	+= SDL
 	endif
-	ifeq ($(call try-build,$(SOURCE_SDL),$(CFLAGS),-lSDL -static), y)
+	ifeq ($(call try-build,$(SOURCE_SDL),$(CFLAGS),$(LDFLAGS) -lSDL -static), y)
 		OBJS_STATOPT	+= ui/sdl.o
 		CFLAGS_STATOPT	+= -DCONFIG_HAS_SDL
 		LIBS_STATOPT	+= -lSDL
 	endif
 endif
 
-ifeq ($(call try-build,$(SOURCE_ZLIB),$(CFLAGS),-lz),y)
+ifeq ($(call try-build,$(SOURCE_ZLIB),$(CFLAGS),$(LDFLAGS) -lz),y)
 	CFLAGS_DYNOPT	+= -DCONFIG_HAS_ZLIB
 	LIBS_DYNOPT	+= -lz
 else
 	NOTFOUND	+= zlib
 endif
-ifeq ($(call try-build,$(SOURCE_ZLIB),$(CFLAGS),-lz -static),y)
+ifeq ($(call try-build,$(SOURCE_ZLIB),$(CFLAGS),$(LDFLAGS) -lz -static),y)
 	CFLAGS_STATOPT	+= -DCONFIG_HAS_ZLIB
 	LIBS_STATOPT	+= -lz
 endif
 
-ifeq ($(call try-build,$(SOURCE_AIO),$(CFLAGS),-laio),y)
+ifeq ($(call try-build,$(SOURCE_AIO),$(CFLAGS),$(LDFLAGS) -laio),y)
 	CFLAGS_DYNOPT	+= -DCONFIG_HAS_AIO
 	LIBS_DYNOPT	+= -laio
 else
 	NOTFOUND	+= aio
 endif
-ifeq ($(call try-build,$(SOURCE_AIO),$(CFLAGS),-laio -static),y)
+ifeq ($(call try-build,$(SOURCE_AIO),$(CFLAGS),$(LDFLAGS) -laio -static),y)
 	CFLAGS_STATOPT	+= -DCONFIG_HAS_AIO
 	LIBS_STATOPT	+= -laio
 endif
 
 ifeq ($(LTO),1)
 	FLAGS_LTO := -flto
-	ifeq ($(call try-build,$(SOURCE_HELLO),$(CFLAGS),$(FLAGS_LTO)),y)
-		CFLAGS		+= $(FLAGS_LTO)
+	ifeq ($(call try-build,$(SOURCE_HELLO),$(CFLAGS),$(LDFLAGS) $(FLAGS_LTO)),y)
+		override CFLAGS	+= $(FLAGS_LTO)
 	endif
 endif
 
-ifeq ($(call try-build,$(SOURCE_STATIC),,-static),y)
-	CFLAGS		+= -DCONFIG_GUEST_INIT
-	CFLAGS      += -DCONFIG_HAS_LIBC
-	GUEST_INIT := guest/init
-	GUEST_OBJS = guest/guest_init.o
+ifeq ($(call try-build,$(SOURCE_STATIC),$(CFLAGS),$(LDFLAGS) -static),y)
+	override CFLAGS	+= -DCONFIG_GUEST_INIT
+	GUEST_INIT	:= guest/init
+	GUEST_OBJS	= guest/guest_init.o
+	ifeq ($(ARCH_PRE_INIT),)
+		GUEST_INIT_FLAGS	+= -static
+	else
+		CFLAGS			+= -DCONFIG_GUEST_PRE_INIT
+		GUEST_INIT_FLAGS	+= -DCONFIG_GUEST_PRE_INIT
+		GUEST_PRE_INIT		:= guest/pre_init
+		GUEST_OBJS		+= guest/guest_pre_init.o
+	endif
 else
 	$(warning No static libc found. Skipping guest init)
 	NOTFOUND        += static-libc
@@ -325,7 +331,8 @@ DEFINES	+= -DKVMTOOLS_VERSION='"$(KVMTOOLS_VERSION)"'
 DEFINES	+= -DBUILD_ARCH='"$(ARCH)"'
 
 KVM_INCLUDE := include
-CFLAGS	+= $(CPPFLAGS) $(DEFINES) -I$(KVM_INCLUDE) -I$(ARCH_INCLUDE) -O2 -fno-strict-aliasing -g
+override CFLAGS	+= $(CPPFLAGS) $(DEFINES) -I$(KVM_INCLUDE) -I$(ARCH_INCLUDE)
+override CFLAGS	+= -O2 -fno-strict-aliasing -g
 
 WARNINGS += -Wall
 WARNINGS += -Wformat=2
@@ -343,13 +350,13 @@ WARNINGS += -Wvolatile-register-var
 WARNINGS += -Wwrite-strings
 WARNINGS += -Wno-format-nonliteral
 
-CFLAGS	+= $(WARNINGS)
+override CFLAGS	+= $(WARNINGS)
 
 ifneq ($(WERROR),0)
-	CFLAGS += -Werror
+	override CFLAGS += -Werror
 endif
 
-all: $(PROGRAM) $(PROGRAM_ALIAS) $(GUEST_INIT)
+all: $(PROGRAM) $(PROGRAM_ALIAS) $(GUEST_INIT) $(GUEST_PRE_INIT)
 
 # CFLAGS used when building objects
 # This is intentionally not assigned using :=
@@ -363,24 +370,28 @@ c_flags	= -Wp,-MD,$(depfile) $(CFLAGS)
 #
 STATIC_OBJS = $(patsubst %.o,%.static.o,$(OBJS) $(OBJS_STATOPT))
 
-STATIC_DEPS	:= $(foreach obj,$(STATIC_OBJS),\
-		$(subst $(comma),_,$(dir $(obj)).$(notdir $(obj)).d))
-
-$(PROGRAM)-static:  $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_INIT)
+$(PROGRAM)-static:  $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_INIT) $(GUEST_PRE_INIT)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) -static $(CFLAGS) $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_OBJS) $(LIBS) $(LIBS_STATOPT) -o $@
+	$(Q) $(CC) -static $(CFLAGS) $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_OBJS) $(LDFLAGS) $(LIBS) $(LIBS_STATOPT) -o $@
 
-$(PROGRAM): $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_INIT)
+$(PROGRAM): $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_INIT) $(GUEST_PRE_INIT)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(CFLAGS) $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS) $(LIBS) $(LIBS_DYNOPT) -o $@
+	$(Q) $(CC) $(CFLAGS) $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS) $(LDFLAGS) $(LIBS) $(LIBS_DYNOPT) -o $@
 
 $(PROGRAM_ALIAS): $(PROGRAM)
 	$(E) "  LN      " $@
 	$(Q) ln -f $(PROGRAM) $@
 
+ifneq ($(ARCH_PRE_INIT),)
+$(GUEST_PRE_INIT): $(ARCH_PRE_INIT)
+	$(E) "  LINK    " $@
+	$(Q) $(CC) -s -nostdlib $(ARCH_PRE_INIT) -o $@
+	$(Q) $(LD) $(LDFLAGS) -r -b binary -o guest/guest_pre_init.o $(GUEST_PRE_INIT)
+endif
+
 $(GUEST_INIT): guest/init.c
 	$(E) "  LINK    " $@
-	$(Q) $(CC) -static guest/init.c -o $@
+	$(Q) $(CC) $(GUEST_INIT_FLAGS) guest/init.c -o $@
 	$(Q) $(LD) $(LDFLAGS) -r -b binary -o guest/guest_init.o $(GUEST_INIT)
 
 %.s: %.c
@@ -479,7 +490,7 @@ clean:
 	$(Q) rm -f x86/bios/bios-rom.h
 	$(Q) rm -f tests/boot/boot_test.iso
 	$(Q) rm -rf tests/boot/rootfs/
-	$(Q) rm -f $(DEPS) $(STATIC_DEPS) $(OBJS) $(OTHEROBJS) $(OBJS_DYNOPT) $(STATIC_OBJS) $(PROGRAM) $(PROGRAM_ALIAS) $(PROGRAM)-static $(GUEST_INIT) $(GUEST_OBJS)
+	$(Q) rm -f $(DEPS) $(OBJS) $(OTHEROBJS) $(OBJS_DYNOPT) $(STATIC_OBJS) $(PROGRAM) $(PROGRAM_ALIAS) $(PROGRAM)-static $(GUEST_INIT) $(GUEST_PRE_INIT) $(GUEST_OBJS)
 	$(Q) rm -f cscope.*
 	$(Q) rm -f tags
 	$(Q) rm -f TAGS

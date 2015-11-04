@@ -122,32 +122,50 @@ static const char *guestfs_symlinks[] = {
 };
 
 #ifdef CONFIG_GUEST_INIT
-extern char _binary_guest_init_start;
-extern char _binary_guest_init_size;
-
-int kvm_setup_guest_init(const char *guestfs_name)
+static int extract_file(const char *guestfs_name, const char *filename,
+			const void *data, const void *_size)
 {
 	char path[PATH_MAX];
-	size_t size;
 	int fd, ret;
-	char *data;
 
-	if (!_binary_guest_init_size)
-		die("Guest init not compiled");
-	size = (size_t)&_binary_guest_init_size;
-	data = (char *)&_binary_guest_init_start;
-	snprintf(path, PATH_MAX, "%s%s/virt/init", kvm__get_dir(), guestfs_name);
-	remove(path);
-	fd = open(path, O_CREAT | O_WRONLY, 0755);
-	if (fd < 0)
+	snprintf(path, PATH_MAX, "%s%s/%s", kvm__get_dir(),
+				guestfs_name, filename);
+
+	fd = open(path, O_EXCL | O_CREAT | O_WRONLY, 0755);
+	if (fd < 0) {
+		if (errno == EEXIST)
+			return 0;
 		die("Fail to setup %s", path);
-	ret = xwrite(fd, data, size);
+	}
+
+	ret = xwrite(fd, data, (size_t)_size);
 	if (ret < 0)
 		die("Fail to setup %s", path);
 	close(fd);
 
 	return 0;
+}
 
+extern char _binary_guest_init_start;
+extern char _binary_guest_init_size;
+extern char _binary_guest_pre_init_start;
+extern char _binary_guest_pre_init_size;
+
+int kvm_setup_guest_init(const char *guestfs_name)
+{
+	int err;
+
+#ifdef CONFIG_GUEST_PRE_INIT
+	err = extract_file(guestfs_name, "virt/pre_init",
+				&_binary_guest_pre_init_start,
+				&_binary_guest_pre_init_size);
+	if (err)
+		return err;
+#endif
+	err = extract_file(guestfs_name, "virt/init",
+				&_binary_guest_init_start,
+				&_binary_guest_init_size);
+	return err;
 }
 #else
 int kvm_setup_guest_init(const char *guestfs_name)

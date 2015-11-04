@@ -59,14 +59,6 @@ static int  kvm_run_wrapper;
 
 bool do_debug_print = false;
 
-#ifdef CONFIG_HAS_LIBC
-extern char _binary_guest_init_start;
-extern char _binary_guest_init_size;
-#else
-static char _binary_guest_init_start=0;
-static char _binary_guest_init_size=0;
-#endif
-
 static const char * const run_usage[] = {
 	"lkvm run [<options>] [<kernel image>]",
 	NULL
@@ -575,12 +567,6 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	memset(real_cmdline, 0, sizeof(real_cmdline));
 	kvm__arch_set_cmdline(real_cmdline, kvm->cfg.vnc || kvm->cfg.sdl || kvm->cfg.gtk);
 
-	if (strlen(real_cmdline) > 0)
-		strcat(real_cmdline, " ");
-
-	if (kvm->cfg.kernel_cmdline)
-		strlcat(real_cmdline, kvm->cfg.kernel_cmdline, sizeof(real_cmdline));
-
 	if (!kvm->cfg.guest_name) {
 		if (kvm->cfg.custom_rootfs) {
 			kvm->cfg.guest_name = kvm->cfg.custom_rootfs_name;
@@ -605,19 +591,28 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	}
 
 	if (kvm->cfg.using_rootfs) {
-		strcat(real_cmdline, " root=/dev/root rw rootflags=rw,trans=virtio,version=9p2000.L rootfstype=9p");
+		strcat(real_cmdline, " rw rootflags=trans=virtio,version=9p2000.L,cache=loose rootfstype=9p");
 		if (kvm->cfg.custom_rootfs) {
 			kvm_run_set_sandbox(kvm);
 
+#ifdef CONFIG_GUEST_PRE_INIT
+			strcat(real_cmdline, " init=/virt/pre_init");
+#else
 			strcat(real_cmdline, " init=/virt/init");
+#endif
 
 			if (!kvm->cfg.no_dhcp)
 				strcat(real_cmdline, "  ip=dhcp");
 			if (kvm_setup_guest_init(kvm->cfg.custom_rootfs_name))
 				die("Failed to setup init for guest.");
 		}
-	} else if (!strstr(real_cmdline, "root=")) {
+	} else if (!kvm->cfg.kernel_cmdline || !strstr(kvm->cfg.kernel_cmdline, "root=")) {
 		strlcat(real_cmdline, " root=/dev/vda rw ", sizeof(real_cmdline));
+	}
+
+	if (kvm->cfg.kernel_cmdline) {
+		strcat(real_cmdline, " ");
+		strlcat(real_cmdline, kvm->cfg.kernel_cmdline, sizeof(real_cmdline));
 	}
 
 	kvm->cfg.real_cmdline = real_cmdline;
