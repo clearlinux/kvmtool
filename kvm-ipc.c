@@ -150,6 +150,9 @@ int kvm__enumerate_instances(int (*callback)(const char *name, int fd))
 	for (;;) {
 		entry = readdir(dir);
 		
+		if(entry == NULL)
+			break ;
+		
 		if (is_socket(path, entry)) {
 			ssize_t name_len = strlen(entry->d_name);
 			char *p;
