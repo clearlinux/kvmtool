@@ -148,7 +148,7 @@ int kvm__enumerate_instances(int (*callback)(const char *name, int fd))
 		return -errno;
 
 	for (;;) {
-		entry = readdir_r(dir);
+		entry = readdir(dir);
 		
 		if (is_socket(path, entry)) {
 			ssize_t name_len = strlen(entry->d_name);
